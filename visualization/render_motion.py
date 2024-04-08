@@ -12,7 +12,6 @@ from pytorch3d.transforms import axis_angle_to_quaternion, quaternion_apply, qua
 from p_tqdm import p_map
 
 from dataset.quaternion import ax_from_6v
-from diffusion.diffusion import GaussianDiffusion
 
 
 smpl_joints = [
@@ -354,7 +353,7 @@ class SMPLSkeleton:
 ### just_render_simple: most abstracted function, just renders the skeleton into an .mp4
 
 def just_render_simple(
-    model: GaussianDiffusion, 
+    smpl: SMPLSkeleton, 
     model_output,
     normalizer,
     render_out,
@@ -378,7 +377,7 @@ def just_render_simple(
     # go 6d to ax
     q = ax_from_6v(q).to('cuda')
 
-    poses = model.smpl.forward(q, pos).detach().cpu().numpy()
+    poses = smpl.forward(q, pos).detach().cpu().numpy()
     
     def inner(xx):
         num, pose = xx

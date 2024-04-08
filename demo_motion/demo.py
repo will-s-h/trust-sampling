@@ -85,7 +85,7 @@ def main(opt):
         print(f'Rendering {NUM} samples...')
         render_dir = os.path.join(opt.render_dir, f"{opt.model_name}")
         if not os.path.isdir(render_dir): os.makedirs(render_dir)
-        just_render_simple(model.diffusion, samples[:NUM], model.normalizer, render_out=render_dir)
+        just_render_simple(model.smpl, samples[:NUM], model.normalizer, render_out=render_dir)
         
         print(f'Rendering trajectory changes...')
         ani = trajectory_animation(traj_found, traj)

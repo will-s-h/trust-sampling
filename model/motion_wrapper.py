@@ -13,9 +13,10 @@ from torch.utils.data import DataLoader
 import wandb
 from accelerate import Accelerator, DistributedDataParallelKwargs
 from accelerate.state import AcceleratorState
-from einops import rearrange
+from einops import rearrange, reduce
 from tqdm import tqdm
 
+from dataset.quaternion import ax_from_6v
 from dataset.AMASS_dataset import MotionDataset
 from dataset.preprocess import increment_path
 from diffusion.adan import Adan
@@ -37,12 +38,11 @@ class MotionWrapper:
     def __init__(
         self,
         checkpoint_path="",
-        normalizer=None,
         EMA=True,
+        loss_type="l2",
         learning_rate=4e-4,
         weight_decay=0.02,
         predict_contact=False,
-        use_masks=False,
         training_from_ckpt=False,
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -50,19 +50,14 @@ class MotionWrapper:
         state = AcceleratorState()
         num_processes = state.num_processes
 
-        # pos_dim = 3
-        # rot_dim = 24 * 6  # 24 joints, 6dof
-        # self.repr_dim = repr_dim = pos_dim + rot_dim + 4
-
         pos_dim = 3
-        rot_dim = 22 * 6  # 22 joints, 6dof
+        rot_dim = 22*6 # 22 joints, 6dof
         self.predict_contact = predict_contact
         self.repr_dim = repr_dim = pos_dim + rot_dim + (4 if self.predict_contact else 0)
 
-        feature_dim = 4800
         horizon_seconds = 3
         FPS = 20
-        self.horizon = horizon = horizon_seconds * FPS
+        self.horizon = horizon_seconds * FPS
 
         self.accelerator.wait_for_everyone()
 
@@ -75,32 +70,23 @@ class MotionWrapper:
 
         model = MotionDecoder(
             nfeats=repr_dim,
-            seq_len=horizon,
             latent_dim=512,
             ff_size=1024,
             num_layers=8,
             num_heads=8,
             dropout=0.1,
-            cond_feature_dim=feature_dim,
-            activation=F.gelu,
-            use_masks=use_masks
+            activation=F.gelu
         )
 
-        smpl = SMPLSkeleton(self.accelerator.device)
+        self.smpl = SMPLSkeleton(self.accelerator.device)
         diffusion = GaussianDiffusion(
             model,
-            horizon,
-            repr_dim,
-            smpl,
             schedule="cosine",
             n_timestep=1000,
-            predict_epsilon=False,
-            loss_type="l2",
-            use_p2=False,
-            cond_drop_prob=0.25,
-            guidance_weight=2,
             predict_contact=self.predict_contact,
         )
+        
+        self.loss_fn = F.mse_loss if loss_type == "l2" else F.l1_loss
 
         print(
             "Model has {} parameters".format(sum(y.numel() for y in model.parameters()))
@@ -143,7 +129,95 @@ class MotionWrapper:
 
     def prepare(self, objects):
         return self.accelerator.prepare(*objects)
+    
+    def p_losses(self, x_start, t):
+        '''
+        x_start : [batch_size x 60 x 135]
+        cond : None
+        t : [batch_size], randomly generated
+        '''
+        noise = torch.randn_like(x_start)
+        x_noisy = self.diffusion.q_sample(x_start=x_start, t=t, noise=noise)
 
+        # reconstruct
+        x_recon = self.model(x_noisy, t)
+        assert noise.shape == x_recon.shape
+        model_out, target = x_recon, x_start        # NOTE: we assume MotionDecoder predicts x_start, not epsilon!!
+
+        # full reconstruction loss
+        loss = self.loss_fn(model_out, target, reduction="none")
+        loss = reduce(loss, "b ... -> b (...)", "mean")
+        
+        # root motion extra loss
+        loss_root = self.loss_fn(model_out[...,:3], target[...,:3], reduction="none") if not self.predict_contact else \
+                    self.loss_fn(model_out[...,4:7], target[...,4:7], reduction="none")
+        loss_root = reduce(loss_root, "b ... -> b (...)", "mean")
+
+        if not self.predict_contact:
+            losses = (
+                0.636 * loss.mean(),
+                1.000 * loss_root.mean(),
+                torch.tensor(0.0,device='cuda'),
+                torch.tensor(0.0,device='cuda'),
+                torch.tensor(0.0,device='cuda')
+            )
+            return sum(losses), losses
+        
+        # split off contact from the rest
+        model_contact, model_out = torch.split(
+            model_out, (4, model_out.shape[2] - 4), dim=2
+        )
+        target_contact, target = torch.split(target, (4, target.shape[2] - 4), dim=2)
+        
+        # FK loss
+        b, s, c = model_out.shape
+        
+        # unnormalize
+        model_out, target = self.normalizer.unnormalize(model_out), self.normalizer.unnormalize(target)
+        
+        # X, Q
+        model_x = model_out[:, :, :3]
+        model_q = ax_from_6v(model_out[:, :, 3:].reshape(b, s, -1, 6))  # should be b, s, 22, 6
+        target_x = target[:, :, :3]
+        target_q = ax_from_6v(target[:, :, 3:].reshape(b, s, -1, 6))  # should be b, s, 22, 6
+        
+        # perform FK
+        model_xp = self.smpl.forward(model_q, model_x)
+        target_xp = self.smpl.forward(target_q, target_x)
+
+        fk_loss = self.loss_fn(model_xp, target_xp, reduction="none")
+        fk_loss = reduce(fk_loss, "b ... -> b (...)", "mean")
+        
+        # foot skate loss
+        foot_idx = [7, 8, 10, 11]
+        
+        # find static indices consistent with model's own predictions
+        static_idx = model_contact > 0.95  # N x S x 4
+        model_feet = model_xp[:, :, foot_idx]  # foot positions (N, S, 4, 3)
+        model_foot_v = torch.zeros_like(model_feet)
+        model_foot_v[:, :-1] = (
+            model_feet[:, 1:, :, :] - model_feet[:, :-1, :, :]
+        )  # (N, S-1, 4, 3)
+        model_foot_v[~static_idx] = 0
+        foot_loss = self.loss_fn(
+            model_foot_v, torch.zeros_like(model_foot_v), reduction="none"
+        )
+        foot_loss = reduce(foot_loss, "b ... -> b (...)", "mean")
+
+        losses = (
+            0.636 * loss.mean(),
+            1.000 * loss_root.mean(),
+            0.646 * fk_loss.mean(),
+            10.942 * foot_loss.mean(),
+            torch.tensor(0.0, device='cuda')
+        )
+        return sum(losses), losses
+
+    def loss(self, x):
+        batch_size = len(x)
+        t = torch.randint(0, self.n_timestep, (batch_size,), device=x.device).long()
+        return self.p_losses(x, t)
+    
     def train_loop(self, opt):
         # load datasets
         train_tensor_dataset_path = os.path.join(
@@ -169,7 +243,6 @@ class MotionWrapper:
 
         # set normalizer
         self.normalizer = train_dataset.normalizer
-        # self.normalizer = None
 
         # data loaders
         # decide number of workers based on cpu count
@@ -205,23 +278,13 @@ class MotionWrapper:
             avg_fkloss = 0
             avg_footloss = 0
             avg_inpaintloss = 0
+            
             # train
             self.train()
-            # for step, (x, cond, filename, wavnames) in enumerate(
-            #     load_loop(train_data_loader)
-            # ):
-            for step, x in enumerate(
-                load_loop(train_data_loader)
-            ):
-                # total_loss, (loss, v_loss, fk_loss, foot_loss) = self.diffusion(
-                #     x, cond, t_override=None
-                # )
-                total_loss, (loss, v_loss, fk_loss, foot_loss, inpaint_loss) = self.diffusion(
-                    x, None, t_override=None, normalizer=self.normalizer # NOTE: cond is None!!!
-                )
+            for step, x in enumerate(load_loop(train_data_loader)):
+                total_loss, (loss, v_loss, fk_loss, foot_loss, inpaint_loss) = self.loss(x)
                 self.optim.zero_grad()
                 self.accelerator.backward(total_loss)
-
                 self.optim.step()
 
                 # ema update and train loss update only on main
@@ -235,8 +298,8 @@ class MotionWrapper:
                         self.diffusion.ema.update_model_average(
                             self.diffusion.master_model, self.diffusion.model
                         )
+                        
             # Save model
-            # if (epoch % 1) == 0:
             if (epoch % opt.save_interval) == 0:
                 # everyone waits here for the val loop to finish ( don't start next train epoch early)
                 self.accelerator.wait_for_everyone()
@@ -358,8 +421,6 @@ class TransformerEncoderLayer(nn.Module):
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = True,
-        device=None,
-        dtype=None,
         rotary=None,
     ) -> None:
         super().__init__()
@@ -429,8 +490,6 @@ class FiLMTransformerDecoderLayer(nn.Module):
         layer_norm_eps=1e-5,
         batch_first=False,
         norm_first=True,
-        device=None,
-        dtype=None,
         rotary=None,
     ):
         super().__init__()
@@ -447,42 +506,29 @@ class FiLMTransformerDecoderLayer(nn.Module):
 
         self.norm_first = norm_first
         self.norm1 = nn.LayerNorm(d_model, eps=layer_norm_eps)
-        # self.norm2 = nn.LayerNorm(d_model, eps=layer_norm_eps)
         self.norm3 = nn.LayerNorm(d_model, eps=layer_norm_eps)
         self.dropout1 = nn.Dropout(dropout)
-        # self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
         self.activation = activation
 
         self.film1 = DenseFiLM(d_model)
-        # self.film2 = DenseFiLM(d_model)
         self.film3 = DenseFiLM(d_model)
 
         self.rotary = rotary
         self.use_rotary = rotary is not None
 
-    # x, cond, t
+    # x, t
     def forward(
         self,
         tgt,
-        memory,
         t,
         tgt_mask=None,
-        memory_mask=None,
         tgt_key_padding_mask=None,
-        memory_key_padding_mask=None,
     ):
         x = tgt
         if self.norm_first:
-            # self-attention -> film -> residual
             x_1 = self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask)
             x = x + featurewise_affine(x_1, self.film1(t))
-            ## cross-attention -> film -> residual (REMOVED)
-            # x_2 = self._mha_block(
-            #     self.norm2(x), memory, memory_mask, memory_key_padding_mask
-            # )
-            # x = x + featurewise_affine(x_2, self.film2(t))
-            # feedforward -> film -> residual
             x_3 = self._ff_block(self.norm3(x))
             x = x + featurewise_affine(x_3, self.film3(t))
         else:
@@ -492,13 +538,6 @@ class FiLMTransformerDecoderLayer(nn.Module):
                     self._sa_block(x, tgt_mask, tgt_key_padding_mask), self.film1(t)
                 )
             )
-            # x = self.norm2(
-            #     x
-            #     + featurewise_affine(
-            #         self._mha_block(x, memory, memory_mask, memory_key_padding_mask),
-            #         self.film2(t),
-            #     )
-            # )
             x = self.norm3(x + featurewise_affine(self._ff_block(x), self.film3(t)))
         return x
 
@@ -542,9 +581,9 @@ class DecoderLayerStack(nn.Module):
         super().__init__()
         self.stack = stack
 
-    def forward(self, x, cond, t):
+    def forward(self, x, t):
         for layer in self.stack:
-            x = layer(x, cond, t)
+            x = layer(x, t)
         return x
 
 
@@ -552,24 +591,17 @@ class MotionDecoder(nn.Module):
     def __init__(
         self,
         nfeats: int,
-        seq_len: int = 150,  # 5 seconds, 30 fps
         latent_dim: int = 256,
         ff_size: int = 1024,
         num_layers: int = 4,
         num_heads: int = 4,
         dropout: float = 0.1,
-        cond_feature_dim: int = 4800,
         activation: Callable[[Tensor], Tensor] = F.gelu,
-        use_rotary=True,
-        use_masks: bool = False,
-        **kwargs
+        use_rotary=True
     ) -> None:
 
         super().__init__()
-
         output_feats = nfeats
-        self.use_masks = use_masks
-        mask_dim = latent_dim if use_masks else 0
 
         # positional embeddings
         self.rotary = None
@@ -588,35 +620,19 @@ class MotionDecoder(nn.Module):
             nn.Linear(latent_dim, latent_dim * 4),
             nn.Mish(),
         )
-
-        self.to_time_cond = nn.Sequential(nn.Linear(latent_dim * 4, latent_dim + mask_dim),)
+        
+        # using nn.Sequential since previous saved models have these keys saved in their .pt file
+        self.to_time_cond = nn.Sequential(nn.Linear(latent_dim * 4, latent_dim),)
 
         # input projection
         self.input_projection = nn.Linear(nfeats, latent_dim)
-        if use_masks:
-            self.mask_encoder = nn.Sequential()
-            for _ in range(2):
-                self.mask_encoder.append(
-                    TransformerEncoderLayer(
-                        d_model=latent_dim,
-                        nhead=num_heads,
-                        dim_feedforward=ff_size,
-                        dropout=dropout,
-                        activation=activation,
-                        batch_first=True,
-                        rotary=self.rotary,
-                    )
-                )
-                
-        # conditional projection
-        if use_masks: self.mask_projection = nn.Linear(nfeats, latent_dim)
         
         # decoder
         decoderstack = nn.ModuleList([])
         for _ in range(num_layers):
             decoderstack.append(
                 FiLMTransformerDecoderLayer(
-                    latent_dim + mask_dim,
+                    latent_dim,
                     num_heads,
                     dim_feedforward=ff_size,
                     dropout=dropout,
@@ -627,36 +643,23 @@ class MotionDecoder(nn.Module):
             )
 
         self.seqTransDecoder = DecoderLayerStack(decoderstack)
-        
-        self.final_layer = nn.Linear(latent_dim + mask_dim, output_feats)
+        self.final_layer = nn.Linear(latent_dim, output_feats)
 
     
     def forward(
-        self, x: Tensor, mask: Tensor, times: Tensor
+        self, x: Tensor, times: Tensor
     ):
-        batch_size, device = x.shape[0], x.device
-
         # project to latent space
         x = self.input_projection(x)
         # add the positional embeddings of the input sequence to provide temporal information
         x = self.abs_pos_encoding(x)
-
-        if self.use_masks:
-            mask_tokens = self.mask_projection(mask)
-            # # encode tokens
-            # # conditional encoder is a full transformer encoder - we can simplify!
-            mask_tokens = self.abs_pos_encoding(mask_tokens)
-            mask_tokens = self.mask_encoder(mask_tokens)
 
         # sinusoidal position embedding - linear layer - non-linearity (output size is 4*latent_dim)
         t_hidden = self.time_mlp(times)
         t = self.to_time_cond(t_hidden) # linear from 4*latent_dim to latent_dim
 
         # Pass through the transformer decoder
-        # attending to the conditional embedding
-        if self.use_masks:
-            x = torch.cat((x, mask_tokens), dim=2)
-        output = self.seqTransDecoder(x, None, t)
+        output = self.seqTransDecoder(x, t)
 
         output = self.final_layer(output)
         return output
