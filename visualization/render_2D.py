@@ -32,7 +32,7 @@ def _plot_constraint(ax=None, constraint=None):
         ys = constraint.gety(xs)
         xs = xs[(-2 <= ys) & (ys <= 2)]
         ys = ys[(-2 <= ys) & (ys <= 2)]
-        ax.plot(xs, ys, alpha=0.1)
+        ax.plot(xs, ys, alpha=0.5)
         return fig, ax
     except:
         raise NotImplementedError(f"No implementation of plotting constraint of type {type(constraint)}")

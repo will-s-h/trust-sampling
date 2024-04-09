@@ -167,17 +167,20 @@ class GaussianDiffusion(nn.Module):
             
             if save_intermediates: intermediates.append(x)
                   
-            # new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
-            # print(f'reached norm: {torch.norm(new_pred_noise).item()}')
+            new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
+            print(f'reached norm: {torch.norm(new_pred_noise).item()}')
         return intermediates if save_intermediates else x
     
     def _get_trajectory(self, x):
         return x[..., 4:6].squeeze(0).cpu() if x.dim() == 3 and x.shape[0] == 1 else x[..., 4:6].cpu()
-    
+
     @torch.no_grad()
-    def trust_sample(self, shape, sample_steps=50, constraint_obj=None, debug=False, **kwargs):
-        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
-        assert constraint_obj is not None
+    def trust_sample(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False, **kwargs):
+        MOTION = False
+
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 0
+        assert constraint_obj is not None, "must pass in constraint object!"
+        assert (not save_intermediates or not debug), "cannot both save intermediates and be in debug mode. must pick one of the two!"
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
@@ -186,21 +189,27 @@ class GaussianDiffusion(nn.Module):
         x = torch.randn(shape, device = device)
 
         x_start = None
-        traj = [(self._get_trajectory(x), 1001, 'starting trajectory')]
+        traj, intermediates = [], []
+        if debug: traj.append((self._get_trajectory(x), 1001, 'starting trajectory'))
+        if save_intermediates: intermediates.append(x)
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
             # just repeat each step 5 times
-            for _ in range(5 if time_next < 0 else 1):
+            iterations = 5
+            if 20 <= time <= 30: iterations = 40
+            if MOTION: iterations = 5 if time_next < 0 else 1
+            for _ in range(iterations):
                 
                 # produce a bunch of times, for each of the samples in the batch
                 time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
                 
                 # predict completely denoised product
                 pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
-                traj.append((self._get_trajectory(x_start), time, 'diffusion step'))
+                if debug: traj.append((self._get_trajectory(x_start), time, 'diffusion step'))
                 if time_next < 0:
                     pred_noise, *_ = self.model_predictions(x_start, time_cond, clip_x_start = self.clip_denoised)
-                    print(f'final norm: {torch.norm(pred_noise).item()}')
+                    # print(f'final norm: {torch.norm(pred_noise).item()}')
+                    if save_intermediates: intermediates.append(x_start)
                     x = x_start
                     continue
                 
@@ -216,11 +225,11 @@ class GaussianDiffusion(nn.Module):
                 #### new stuff
                 model_mean = x_start * alpha_next.sqrt() + c * pred_noise
                 new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
-                print(f'reached norm: {torch.norm(new_pred_noise).item()}')
+                # print(f'reached norm: {torch.norm(new_pred_noise).item()}')
                 j = 0
                 
-                NORM_UPPER_BOUND = 80
-                ITERATIONS_MAX   = 5
+                NORM_UPPER_BOUND = 80 if MOTION else 35
+                ITERATIONS_MAX   = 5 if MOTION else 2
                 while j < ITERATIONS_MAX and torch.norm(new_pred_noise).item() <= NORM_UPPER_BOUND:
                     const = c * extract(self.sqrt_one_minus_alphas_cumprod, time_cond, x.shape)
                     
@@ -235,26 +244,30 @@ class GaussianDiffusion(nn.Module):
                     #     g *= 1 / torch.norm(g).item()
                     
                     # experiment 3: only backprop
-                    g = (1) * constraint_obj.traj_constraint_backprop(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-                    g *= 1 / torch.norm(g).item()
+                    g = (1) * constraint_obj.traj_constraint_backprop(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)) if MOTION else \
+                        -const/10 * constraint_obj.gradient(model_mean)
+                    if MOTION: g *= 1 / torch.norm(g).item()
                     
-                    print(f'size of gradient step: {torch.norm(g).item()}')
+                    # print(f'size of gradient step: {torch.norm(g).item()}')
                     model_mean = model_mean + g
-                    traj.append((self._get_trajectory(model_mean), time, 'gradient step'))
+                    if debug: traj.append((self._get_trajectory(model_mean), time, 'gradient step'))
                     j += 1
                     new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
                 
                 x = model_mean + sigma * noise
                 new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
-                traj.append((self._get_trajectory(x), time, 'noise'))
-                print(f'{j} iterations, reached norm: {torch.norm(new_pred_noise).item()}')
+                if debug: traj.append((self._get_trajectory(x), time, 'noise'))
+                # print(f'{j} iterations, reached norm: {torch.norm(new_pred_noise).item()}')
                 
                 #### next stuff
 
                 # x = x_start * alpha_next.sqrt() + \
                 #     c * pred_noise + \
                 #     sigma * noise
-        return (x, traj) if debug else x
+            if save_intermediates: intermediates.append(x)
+        if debug: return (x, traj)
+        if save_intermediates: return intermediates
+        return x
 
 
     # ------------------------------------------ training ------------------------------------------#
