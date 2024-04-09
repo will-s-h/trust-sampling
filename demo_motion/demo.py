@@ -73,8 +73,7 @@ def main(opt):
     const = CustomConstraint(traj=traj)
     
     shape = (NUM, model.horizon, model.repr_dim)
-    cond = torch.ones(NUM).to(model.accelerator.device)  # throwaway values; artifacts of the original EDGE codebase
-    samples, traj_found = model.diffusion.trust_sample(shape, cond, constraint_obj=const, debug=True)
+    samples, traj_found = model.diffusion.trust_sample(shape, constraint_obj=const, debug=True)
     
     print(f'Finished generating trust samples.')
     if opt.save_motions: 

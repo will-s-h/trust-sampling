@@ -34,14 +34,13 @@ class GaussianDiffusion(nn.Module):
         model,
         n_timestep=1000,
         schedule="linear",
-        clip_denoised=True,
-        predict_contact=False,
+        predict_epsilon=False,
+        clip_denoised=True
     ):
         super().__init__()
         self.model = model  # this model is the either a MotionDecoder or 2D model
         self.ema = EMA(0.9999)
         self.master_model = copy.deepcopy(self.model)
-        self.predict_contact = predict_contact
         
         betas = torch.Tensor(
             make_beta_schedule(schedule=schedule, n_timestep=n_timestep)
@@ -52,6 +51,7 @@ class GaussianDiffusion(nn.Module):
 
         self.n_timestep = int(n_timestep)
         self.clip_denoised = clip_denoised
+        self.predict_epsilon = predict_epsilon
 
         self.register_buffer("betas", betas)
         self.register_buffer("alphas_cumprod", alphas_cumprod)
@@ -94,6 +94,16 @@ class GaussianDiffusion(nn.Module):
         )
     # ------------------------------------------ sampling ------------------------------------------#
     
+    def predict_start_from_noise(self, x_t, t, noise):
+        """
+            if self.predict_epsilon, model output is (scaled) noise;
+            otherwise, model predicts x0 directly
+        """
+        return (
+            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
+            - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
+        )
+        
     # predict epsilon from x0
     def predict_noise_from_start(self, x_t, t, x0):
         return (
@@ -106,15 +116,20 @@ class GaussianDiffusion(nn.Module):
         model_output = self.model(x, t)
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
         
-        x_start = model_output
-        x_start = maybe_clip(x_start)
-        pred_noise = self.predict_noise_from_start(x, t, x_start)
+        if self.predict_epsilon:
+            pred_noise = model_output
+            x_start = self.predict_start_from_noise(x, t, pred_noise)
+            x_start = maybe_clip(x_start)
+        else:
+            x_start = model_output
+            x_start = maybe_clip(x_start)
+            pred_noise = self.predict_noise_from_start(x, t, x_start)
 
         return pred_noise, x_start
 
         
     @torch.no_grad()
-    def ddim_sample(self, shape, cond, sample_steps=50, **kwargs):
+    def ddim_sample(self, shape, sample_steps=50, save_intermediates=False, **kwargs):
         batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
@@ -122,9 +137,9 @@ class GaussianDiffusion(nn.Module):
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
         x = torch.randn(shape, device = device)
-        cond = cond.to(device)
-
         x_start = None
+        intermediates = []
+        if save_intermediates: intermediates.append(x)
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
             # produce a bunch of times, for each of the samples in the batch
@@ -149,16 +164,18 @@ class GaussianDiffusion(nn.Module):
             x = x_start * alpha_next.sqrt() + \
                   c * pred_noise + \
                   sigma * noise
+            
+            if save_intermediates: intermediates.append(x)
                   
-            new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
-            print(f'reached norm: {torch.norm(new_pred_noise).item()}')
-        return x
+            # new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
+            # print(f'reached norm: {torch.norm(new_pred_noise).item()}')
+        return intermediates if save_intermediates else x
     
     def _get_trajectory(self, x):
         return x[..., 4:6].squeeze(0).cpu() if x.dim() == 3 and x.shape[0] == 1 else x[..., 4:6].cpu()
     
     @torch.no_grad()
-    def trust_sample(self, shape, cond, sample_steps=50, constraint_obj=None, debug=False, **kwargs):
+    def trust_sample(self, shape, sample_steps=50, constraint_obj=None, debug=False, **kwargs):
         batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
         assert constraint_obj is not None
 
@@ -167,7 +184,6 @@ class GaussianDiffusion(nn.Module):
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
         
         x = torch.randn(shape, device = device)
-        cond = cond.to(device)
 
         x_start = None
         traj = [(self._get_trajectory(x), 1001, 'starting trajectory')]
@@ -239,14 +255,6 @@ class GaussianDiffusion(nn.Module):
                 #     c * pred_noise + \
                 #     sigma * noise
         return (x, traj) if debug else x
-    
-    @torch.no_grad()
-    def _get_normalized_loc(self, normalizer, x, y, device='cuda'):
-        X_COORD = 4 if self.predict_contact else 0
-        frame = torch.zeros((1, 1, 135 + X_COORD))
-        frame[0, 0, X_COORD] = x
-        frame[0, 0, X_COORD + 1] = y
-        return normalizer.normalize(frame)[0, 0, X_COORD : X_COORD + 2].to(device)
 
 
     # ------------------------------------------ training ------------------------------------------#

@@ -83,7 +83,6 @@ class MotionWrapper:
             model,
             schedule="cosine",
             n_timestep=1000,
-            predict_contact=self.predict_contact,
         )
         
         self.loss_fn = F.mse_loss if loss_type == "l2" else F.l1_loss
@@ -120,6 +119,14 @@ class MotionWrapper:
                         num_processes,
                     )
                 )
+            
+    @torch.no_grad()
+    def _get_normalized_loc(self, x, y, device='cuda'):
+        X_COORD = 4 if self.predict_contact else 0
+        frame = torch.zeros((1, 1, 135 + X_COORD))
+        frame[0, 0, X_COORD] = x
+        frame[0, 0, X_COORD + 1] = y
+        return self.normalizer.normalize(frame)[0, 0, X_COORD : X_COORD + 2].to(device)
 
     def eval(self):
         self.diffusion.eval()
