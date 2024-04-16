@@ -174,11 +174,112 @@ class GaussianDiffusion(nn.Module):
     def _get_trajectory(self, x):
         return x[..., 4:6].squeeze(0).cpu() if x.dim() == 3 and x.shape[0] == 1 else x[..., 4:6].cpu()
 
+    def get_norm_upper_bound(self):
+        raise NotImplementedError("need to implement automatic norm upper bound finding")
+
+    @torch.no_grad()  # note that weight ranges from 0.3 to 1 in DPS paper
+    def dps_sample(self, shape, sample_steps=50, constraint_obj=None, weight=1, save_intermediates=False, **kwargs):
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
+
+        times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
+        times = list(reversed(times.int().tolist()))
+        time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+
+        x = torch.randn(shape, device = device)
+        x_start = None
+        intermediates = []
+        if save_intermediates: intermediates.append(x)
+
+        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+            # produce a bunch of times, for each of the samples in the batch
+            time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
+            
+            # predict completely denoised product
+            pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
+
+            if time_next < 0:
+                x = x_start
+                continue
+            
+            # apply diffusion noise again, except with one less step of noise than what was denoised.
+            alpha = self.alphas_cumprod[time]
+            alpha_next = self.alphas_cumprod[time_next]
+
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c = (1 - alpha_next - sigma ** 2).sqrt()
+
+            noise = torch.randn_like(x)
+
+            x = x_start * alpha_next.sqrt() + \
+                  c * pred_noise + \
+                  sigma * noise
+                  
+            # DPS gradient correction:
+            g = constraint_obj.gradient(x_start, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
+            g *= weight / torch.norm(g).item()
+            x += g  # note that the negative sign is included in the .gradient function, in our formulation
+            
+            if save_intermediates: intermediates.append(x)
+            
+        return intermediates if save_intermediates else x
+    
+    @torch.no_grad()  # in paper, gr=0.1 or 0.2
+    def dsg_sample(self, shape, sample_steps=50, constraint_obj=None, gr=0.1, save_intermediates=False, **kwargs):
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
+
+        times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
+        times = list(reversed(times.int().tolist()))
+        time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+
+        x = torch.randn(shape, device = device)
+        x_start = None
+        intermediates = []
+        if save_intermediates: intermediates.append(x)
+
+        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+            # produce a bunch of times, for each of the samples in the batch
+            time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
+            
+            # predict completely denoised product
+            pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
+
+            if time_next < 0:
+                x = x_start
+                continue
+            
+            # apply diffusion noise again, except with one less step of noise than what was denoised.
+            alpha = self.alphas_cumprod[time]
+            alpha_next = self.alphas_cumprod[time_next]
+
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c = (1 - alpha_next - sigma ** 2).sqrt()
+
+            noise = torch.randn_like(x)
+
+            x_next_mean = x_start * alpha_next.sqrt() + c * pred_noise
+            x = x_next_mean + sigma * noise
+                  
+            # DSG sizing of gradient: sqrt(n) * sigma_t
+            g = constraint_obj.gradient(x_start, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
+            g *= sigma * x.numel() ** 0.5 / torch.norm(g).item()
+            x_mod = x_start*alpha_next.sqrt() + c*pred_noise + g  # note that g already has - sign within it
+            
+            # weighted average between xmod and x for diversity
+            x = x + gr*(x_mod - x)
+            
+            if save_intermediates: intermediates.append(x)
+            
+        return intermediates if save_intermediates else x
+    
+    def set_trust_parameters(self, iteration_func = None, norm_upper_bound = None, iterations_max = 1, gradient_norm = 1):
+        self.iteration_func = iteration_func if iteration_func is not None else (lambda x: 1)
+        self.norm_upper_bound = norm_upper_bound if norm_upper_bound is not None else self.get_norm_upper_bound()
+        self.iterations_max = iterations_max
+        self.gradient_norm = gradient_norm
+    
     @torch.no_grad()
     def trust_sample(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False, **kwargs):
-        MOTION = False
-
-        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 0
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
         assert constraint_obj is not None, "must pass in constraint object!"
         assert (not save_intermediates or not debug), "cannot both save intermediates and be in debug mode. must pick one of the two!"
 
@@ -194,10 +295,7 @@ class GaussianDiffusion(nn.Module):
         if save_intermediates: intermediates.append(x)
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
-            # just repeat each step 5 times
-            iterations = 5
-            if 20 <= time <= 30: iterations = 40
-            if MOTION: iterations = 5 if time_next < 0 else 1
+            iterations = self.iteration_func(time_next)
             for _ in range(iterations):
                 
                 # produce a bunch of times, for each of the samples in the batch
@@ -211,7 +309,7 @@ class GaussianDiffusion(nn.Module):
                     # print(f'final norm: {torch.norm(pred_noise).item()}')
                     if save_intermediates: intermediates.append(x_start)
                     x = x_start
-                    continue
+                    break
                 
                 # apply diffusion noise again, except with one less step of noise than what was denoised.
                 alpha = self.alphas_cumprod[time]
@@ -228,9 +326,7 @@ class GaussianDiffusion(nn.Module):
                 # print(f'reached norm: {torch.norm(new_pred_noise).item()}')
                 j = 0
                 
-                NORM_UPPER_BOUND = 80 if MOTION else 35
-                ITERATIONS_MAX   = 5 if MOTION else 2
-                while j < ITERATIONS_MAX and torch.norm(new_pred_noise).item() <= NORM_UPPER_BOUND:
+                while j < self.iterations_max and torch.norm(new_pred_noise).item() <= self.norm_upper_bound:
                     const = c * extract(self.sqrt_one_minus_alphas_cumprod, time_cond, x.shape)
                     
                     # experiment 1: equivalent to less drastic inpainting
@@ -244,9 +340,9 @@ class GaussianDiffusion(nn.Module):
                     #     g *= 1 / torch.norm(g).item()
                     
                     # experiment 3: only backprop
-                    g = (1) * constraint_obj.traj_constraint_backprop(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)) if MOTION else \
-                        -const/10 * constraint_obj.gradient(model_mean)
-                    if MOTION: g *= 1 / torch.norm(g).item()
+                    g = constraint_obj.gradient(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
+                    c = sigma * x.numel() ** 0.5
+                    g *= c / torch.norm(g).item()
                     
                     # print(f'size of gradient step: {torch.norm(g).item()}')
                     model_mean = model_mean + g

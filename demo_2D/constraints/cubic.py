@@ -35,9 +35,9 @@ class CubicConstraint(Constraint):
             yderiv = torch.ones(len(samples))
             return torch.cat((xderiv.unsqueeze(1), yderiv.unsqueeze(1)), dim=1).unsqueeze(1)
     
-    def gradient(self, samples: torch.FloatTensor, func = torch.sign) -> torch.FloatTensor:
+    def gradient(self, samples: torch.FloatTensor, func = None) -> torch.FloatTensor:
         super()._check_dim(samples)
-        factor = func(self.constraint(samples))
+        factor = -torch.sign(self.constraint(samples))
         if samples.dim() == 1:
             J = self.jacobian(samples).squeeze(0)
             return factor * J

@@ -11,14 +11,16 @@ from constraints.cubic import CubicConstraint
 from model.model_2D import MLP
 from diffusion.diffusion import GaussianDiffusion
 from visualization.render_2D import *
+from evaluator import get_all_metrics
 
 # the spiral dataset uses r=theta/3π for 2π ≤ theta ≤ 6π
 MODEL_NAME = "spiral_base"
 model = MLP()
 path = f"../runs/2D/{MODEL_NAME}/model.pth"
+exp_name = f"{MODEL_NAME}_dsg_gr1"
 model.load_state_dict(torch.load(path))
 distr = "spiral"
-# distribution = SpiralConstraint()
+distribution = SpiralConstraint()
 
 # let's define a constraint f(x,y) = 2x+y+1 = 0
 # possible constraints: LineConstraint(2, 1, -1), LineConstraint(1, 2, 0), CubicConstraint(1, 0, -1, 0)
@@ -33,7 +35,12 @@ NUM_SAMPLES = 1000
 ADD_NOISE = True
 
 diffusion = GaussianDiffusion(model, schedule="linear", n_timestep=NUM_TIMESTEPS, predict_epsilon=True, clip_denoised=False)
-samples = diffusion.trust_sample((NUM_SAMPLES, 2), sample_steps=NUM_TIMESTEPS, constraint_obj=constraint, save_intermediates=True)
+# diffusion.set_trust_parameters(iteration_func=lambda x: 1, norm_upper_bound=35, iterations_max=1, gradient_norm=1)
+# diffusion.set_trust_parameters(iteration_func=lambda x: 40 if 20 <= x <= 30 else 1, norm_upper_bound=35, iterations_max=2, gradient_norm=1)
+# samples = diffusion.trust_sample((NUM_SAMPLES, 2), sample_steps=NUM_TIMESTEPS, constraint_obj=constraint, save_intermediates=True)
+# samples = diffusion.dps_sample((NUM_SAMPLES, 2), sample_steps=NUM_TIMESTEPS, constraint_obj=constraint, weight=2, save_intermediates=True)
+samples = diffusion.dsg_sample((NUM_SAMPLES, 2), sample_steps=NUM_TIMESTEPS, constraint_obj=constraint, gr=1, save_intermediates=True)
+
 samples = [sample.numpy() for sample in samples]
 
 # plot all experiments
@@ -44,7 +51,7 @@ def sanity_check(samples):
 
 sanity_check(samples)
 
-save_dir = f"plots/{MODEL_NAME}_trust"
+save_dir = f"plots/{exp_name}"
 if not os.path.exists(save_dir): os.makedirs(save_dir)
 print(f'Saving all plots in path {save_dir}.')
 
@@ -67,3 +74,5 @@ print('Saved constraint_exp.png.')
 ani = video_all_steps(samples, constraint, distr=distr)
 ani.save(f"{save_dir}/diffusion.mp4", writer='ffmpeg')
 print('Saved diffusion.mp4.')
+
+get_all_metrics(samples, constraint, distribution, exp_name=exp_name, auto_save=True, file_path="all_2D_experiments.csv")

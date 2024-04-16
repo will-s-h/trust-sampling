@@ -36,9 +36,9 @@ class LineConstraint(Constraint):
         if samples.dim() == 1: return torch.Tensor([[self.a, self.b]])
         else: return torch.Tensor([[[self.a, self.b]]]).expand(samples.shape[0], 1, self.dimension)
     
-    def gradient(self, samples: torch.FloatTensor, func = torch.sign) -> torch.FloatTensor:
+    def gradient(self, samples: torch.FloatTensor, func = None) -> torch.FloatTensor:
         super()._check_dim(samples)
-        factor = func(self.constraint(samples))
+        factor = -torch.sign(self.constraint(samples))
         if samples.dim() == 1:
             J = self.jacobian(samples).squeeze(0)
             return factor * J

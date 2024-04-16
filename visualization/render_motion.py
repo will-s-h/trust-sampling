@@ -166,116 +166,67 @@ def plot_single_pose(num, poses, lines, ax, axrange, scat, contact, text, colors
 
 def skeleton_render(
     poses,
-    epoch=0,
     out="renders",
-    name="",
-    sound=False,
-    stitch=False,
-    sound_folder="ood_sliced",
     contact=None,
-    render=True,
     colors=None,
 ):
-    if render:
-        # generate the pose with FK
-        Path(out).mkdir(parents=True, exist_ok=True)
-        num_steps = poses.shape[0]
-        
-        fig = plt.figure()
-        ax = fig.add_subplot(projection="3d", computed_zorder=False)  # computed_zorder kwarg requires matplotlib >= 3.5.0
-        
-        point = np.array([0, 0, 1])
-        normal = np.array([0, 0, 1])
-        d = -point.dot(normal)
-        xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
-        z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
-        # plot the plane
-        ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
-        # Create lines initially without data
-        lines = [
-            ax.plot([], [], [], zorder=10, linewidth=1.5)[0]
-            for _ in smpl_parents
-        ]
-        scat = [
-            # ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
-            ax.scatter([], [], [], zorder=10, s=10)
+    # generate the pose with FK
+    Path(out).mkdir(parents=True, exist_ok=True)
+    num_steps = poses.shape[0]
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d", computed_zorder=False)  # computed_zorder kwarg requires matplotlib >= 3.5.0
+    
+    point = np.array([0, 0, 1])
+    normal = np.array([0, 0, 1])
+    d = -point.dot(normal)
+    xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
+    z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
+    # plot the plane
+    ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
+    # Create lines initially without data
+    lines = [
+        ax.plot([], [], [], zorder=10, linewidth=1.5)[0]
+        for _ in smpl_parents
+    ]
+    scat = [
+        # ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
+        ax.scatter([], [], [], zorder=10, s=10)
 
-            for _ in range(4)
-        ]
-        axrange = 3
+        for _ in range(4)
+    ]
+    axrange = 3
 
-        # add text, colors
-        text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
-        colors = colors if isinstance(colors, dict) else {}
+    # add text, colors
+    text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
+    colors = colors if isinstance(colors, dict) else {}
 
-        # create contact labels
-        if contact is None:
-            # the current heuristic says that the feet are in contact 
-            feet = poses[:, (7, 8, 10, 11)]
-            feetv = np.zeros(feet.shape[:2])
-            feetv[:-1] = np.linalg.norm(feet[1:] - feet[:-1], axis=-1)
-            HEURISTIC = 0.02  # in original code, was 0.01
-            contact = feetv < HEURISTIC
-        else:
-            contact = contact > 0.95
-        # Creating the Animation object
-        anim = animation.FuncAnimation(
-            fig,
-            plot_single_pose,
-            num_steps,
-            fargs=(poses, lines, ax, axrange, scat, contact, text, colors),
-            interval=1000 // 20,
-        )
-    if sound:
-        # make a temporary directory to save the intermediate gif in
-        if render:
-            temp_dir = TemporaryDirectory()
-            gifname = os.path.join(temp_dir.name, f"{epoch}.gif")
-            anim.save(gifname)
-
-        # stitch wavs
-        if stitch:
-            assert type(name) == list  # must be a list of names to do stitching
-            name_ = [os.path.splitext(x)[0] + ".wav" for x in name]
-            audio, sr = lr.load(name_[0], sr=None)
-            ll, half = len(audio), len(audio) // 2
-            total_wav = np.zeros(ll + half * (len(name_) - 1))
-            total_wav[:ll] = audio
-            idx = ll
-            for n_ in name_[1:]:
-                audio, sr = lr.load(n_, sr=None)
-                total_wav[idx : idx + half] = audio[half:]
-                idx += half
-            # save a dummy spliced audio
-            audioname = f"{temp_dir.name}/tempsound.wav" if render else os.path.join(out, f'{epoch}_{"_".join(os.path.splitext(os.path.basename(name[0]))[0].split("_")[:-1])}.wav')
-            sf.write(audioname, total_wav, sr)
-            outname = os.path.join(
-                out,
-                f'{epoch}_{"_".join(os.path.splitext(os.path.basename(name[0]))[0].split("_")[:-1])}.mp4',
-            )
-        else:
-            assert type(name) == str
-            assert name != "", "Must provide an audio filename"
-            audioname = name
-            outname = os.path.join(
-                out, f"{epoch}_{os.path.splitext(os.path.basename(name))[0]}.mp4"
-            )
-        if render:
-            out = os.system(
-                f"ffmpeg -loglevel error -stream_loop 0 -y -i {gifname} -i {audioname} -shortest -c:v libx264 -crf 26 -c:a aac -q:a 4 {outname}"
-            )
+    # create contact labels
+    if contact is None:
+        # the current heuristic says that the feet are in contact 
+        feet = poses[:, (7, 8, 10, 11)]
+        feetv = np.zeros(feet.shape[:2])
+        feetv[:-1] = np.linalg.norm(feet[1:] - feet[:-1], axis=-1)
+        HEURISTIC = 0.02  # in original code, was 0.01
+        contact = feetv < HEURISTIC
     else:
-        if render:
-            # actually save the gif
-            path = os.path.normpath(out)
-            pathparts = path.split(os.sep)
-            # previously, this was done with writer = animation.HTMLWriter(fps=20), and with .motion.html
-            # ffmpeg may require updates; to do so, run `conda update ffmpeg` in command line
-            gifname = os.path.join(out, f"{pathparts[-1][:-4]}" + str(name) +".motion.mp4")
-            anim.save(gifname, writer='ffmpeg', fps=20)
+        contact = contact > 0.95
+    # Creating the Animation object
+    anim = animation.FuncAnimation(
+        fig,
+        plot_single_pose,
+        num_steps,
+        fargs=(poses, lines, ax, axrange, scat, contact, text, colors),
+        interval=1000 // 20,
+    )
 
-            # anim.save(gifname)#, savefig_kwargs={"transparent": True, "facecolor": "none"},)
-            # anim.save(gifname, savefig_kwargs={"transparent": True, "facecolor": "none"},)
+    # actually save the gif
+    path = os.path.normpath(out)
+    pathparts = path.split(os.sep)
+    # previously, this was done with writer = animation.HTMLWriter(fps=20), and with .motion.html
+    # ffmpeg may require updates; to do so, run `conda update ffmpeg` in command line
+    gifname = os.path.join(out, f"{pathparts[-1]}" + ".mp4")
+    anim.save(gifname, writer='ffmpeg', fps=20)
     plt.close()
 
 
@@ -381,16 +332,11 @@ def just_render_simple(
     
     def inner(xx):
         num, pose = xx
-        # filename = name[num] if name is not None else None
-        filename = num
 
         contact = sample_contact[num] if sample_contact is not None else None
         skeleton_render(
             pose,
-            epoch=f"e0_b{num}",
             out=render_out,
-            name=filename,
-            sound=False,
             contact=contact,
             colors=colors
         )

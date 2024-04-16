@@ -25,10 +25,13 @@ class Constraint:
         '''
         raise NotImplementedError(f"jacobian() was not defined for this subclass of Constraint.")
     
-    def gradient(self, samples: torch.FloatTensor, func):
+    def gradient(self, samples: torch.FloatTensor, func = None):
         '''
         in contrast with jacobian, this returns a gradient function that points towards a 0 constraint value.
-        func is the (odd) function that the jacobian is multiplied by in order to achieve the gradient
+        
+        UPDATE:
+        func is now used only for compatibility with constraints of other forms (i.e. for motion constraints)
+        -torch.sign is now the default function that the jacobian is multiplied by in order to achieve the gradient
         
         sample: [n, m] or [m] tensor
         ---
