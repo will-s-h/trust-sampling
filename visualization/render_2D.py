@@ -27,6 +27,8 @@ def _plot_constraint(ax=None, constraint=None):
     fig = None
     if ax is None: fig, ax = plt.subplots()
     if constraint is None: return fig, ax
+    if hasattr(constraint, "plot"):
+        return constraint.plot(fig, ax)
     try:  # should work for any constraint where gety is defined
         xs = np.linspace(-2, 2, 200)
         ys = constraint.gety(xs)

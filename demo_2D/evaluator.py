@@ -2,8 +2,14 @@ import os
 import torch
 import pandas as pd
 import numpy as np
+import inspect
 
-def get_all_metrics(samples, constraint, distr, exp_name=None, auto_save=True, file_path="all_2D_experiments.csv"):
+def sanity_check(samples):
+    samples = samples[-1]
+    num_reasonable = sum((samples[:, 0] <= 2) & (samples[:, 0] >= -2) & (samples[:, 1] <= 2) & (samples[:, 1] >= -2))
+    print(f'points within reasonable bounds: {num_reasonable}')
+
+def get_all_metrics(samples, constraint, distr, exp_name=None, auto_save=True, file_path="all_2D_experiments.csv", **kwargs):
     if exp_name is None and auto_save: 
         raise ValueError("must have valid experiment name when autosaving")
     
@@ -11,7 +17,7 @@ def get_all_metrics(samples, constraint, distr, exp_name=None, auto_save=True, f
     c_values = np.abs(constraint.constraint(torch.from_numpy(samples).float()).numpy())
     if np.isnan(c_values).any() or np.isinf(c_values).any():
         print('warning: constraint metric has nan or inf. cleaning this out')
-        values = values[np.isfinite(c_values)]
+        c_values = c_values[np.isfinite(c_values)]
     
     constraint_metrics = {
         "mean": np.mean(c_values),
@@ -22,7 +28,7 @@ def get_all_metrics(samples, constraint, distr, exp_name=None, auto_save=True, f
     d_values = np.abs(np.array([distr.constraint(x).item() for x in torch.from_numpy(samples).float()]))
     if np.isnan(d_values).any() or np.isinf(d_values).any():
         print('warning: constraint metric has nan or inf. cleaning this out')
-        values = values[np.isfinite(d_values)]
+        d_values = d_values[np.isfinite(d_values)]
     
     distr_metrics = {
         "mean": np.mean(d_values),
@@ -43,10 +49,18 @@ def get_all_metrics(samples, constraint, distr, exp_name=None, auto_save=True, f
         for category in metrics:
             for metric in metrics[category]:
                 better_metrics_dict[category + " " + metric] = metrics[category][metric]
+        for arg in kwargs:
+            better_metrics_dict[arg] = kwargs[arg]
         _auto_save(better_metrics_dict, file_path=file_path)
     return metrics
 
 def _auto_save(metrics, file_path="all_2D_experiments.csv"):
+    if "iteration_func" in metrics:
+        try:
+            source = inspect.getsource(metrics['iteration_func'])
+            metrics['iteration_func'] = source
+        except IOError:
+            print('could not extract function code')
     df_new = pd.DataFrame([metrics])
 
     if os.path.isfile(file_path):

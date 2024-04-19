@@ -216,7 +216,9 @@ class GaussianDiffusion(nn.Module):
                   
             # DPS gradient correction:
             g = constraint_obj.gradient(x_start, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-            g *= weight / torch.norm(g).item()
+            dims_to_reduce = tuple(range(1, x.dim()))
+            norms = torch.norm(g, dim=dims_to_reduce, keepdim=True) + 1e-6  #avoid div by 0
+            g *= weight / norms
             x += g  # note that the negative sign is included in the .gradient function, in our formulation
             
             if save_intermediates: intermediates.append(x)
@@ -261,7 +263,9 @@ class GaussianDiffusion(nn.Module):
                   
             # DSG sizing of gradient: sqrt(n) * sigma_t
             g = constraint_obj.gradient(x_start, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-            g *= sigma * x.numel() ** 0.5 / torch.norm(g).item()
+            dims_to_reduce = tuple(range(1, x.dim()))
+            norms = torch.norm(g, dim=dims_to_reduce, keepdim=True) + 1e-6  #avoid div by 0
+            g *= sigma * x.numel() ** 0.5 / norms
             x_mod = x_start*alpha_next.sqrt() + c*pred_noise + g  # note that g already has - sign within it
             
             # weighted average between xmod and x for diversity
@@ -328,32 +332,24 @@ class GaussianDiffusion(nn.Module):
                 
                 while j < self.iterations_max and torch.norm(new_pred_noise).item() <= self.norm_upper_bound:
                     const = c * extract(self.sqrt_one_minus_alphas_cumprod, time_cond, x.shape)
-                    
-                    # experiment 1: equivalent to less drastic inpainting
-                    # g = (const if time < 200 else 1) * constraint_obj.traj_constraint(model_mean if time < 200 else torch.zeros_like(model_mean)) # gradient_f(x)
-                    
-                    # experiment 2: with backprop
-                    # g = (1) * constraint_obj.traj_constraint(torch.zeros_like(model_mean)) if time > 200 else \
-                    #     constraint_obj.traj_constraint_backprop(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-                    
-                    # if time <= 200: 
-                    #     g *= 1 / torch.norm(g).item()
-                    
                     # experiment 3: only backprop
                     g = constraint_obj.gradient(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
                     c = sigma * x.numel() ** 0.5
-                    g *= c / torch.norm(g).item()
+                    dims_to_reduce = tuple(range(1, x.dim()))
+                    norms = torch.norm(g, dim=dims_to_reduce, keepdim=True) + 1e-6  #avoid div by 0
+                    g *= self.gradient_norm / torch.norm(g).item()
+                    
                     
                     # print(f'size of gradient step: {torch.norm(g).item()}')
                     model_mean = model_mean + g
                     if debug: traj.append((self._get_trajectory(model_mean), time, 'gradient step'))
                     j += 1
                     new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
-                
+
                 x = model_mean + sigma * noise
                 new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
                 if debug: traj.append((self._get_trajectory(x), time, 'noise'))
-                # print(f'{j} iterations, reached norm: {torch.norm(new_pred_noise).item()}')
+                print(f'{j} iterations, reached norm: {torch.norm(new_pred_noise).item()}')
                 
                 #### next stuff
 
