@@ -30,8 +30,8 @@ class CircleInequality(Constraint):
         samples[norms < self.rsq] = 0.0
         return -(samples.T / norms).T 
     
-    def plot(self, fig, ax):
-        circle = Circle((self.x, self.y), self.rsq ** 0.5, fill=True, color='red')
+    def plot(self, fig, ax, color='red'):
+        circle = Circle((self.x, self.y), self.rsq ** 0.5, fill=True, color=color, alpha=0.5)
         ax.add_patch(circle)
         return fig, ax
         

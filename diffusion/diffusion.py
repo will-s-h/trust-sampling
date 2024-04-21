@@ -331,13 +331,11 @@ class GaussianDiffusion(nn.Module):
                 j = 0
                 
                 while j < self.iterations_max and torch.norm(new_pred_noise).item() <= self.norm_upper_bound:
-                    const = c * extract(self.sqrt_one_minus_alphas_cumprod, time_cond, x.shape)
-                    # experiment 3: only backprop
+                    # const = c * extract(self.sqrt_one_minus_alphas_cumprod, time_cond, x.shape)
                     g = constraint_obj.gradient(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-                    c = sigma * x.numel() ** 0.5
                     dims_to_reduce = tuple(range(1, x.dim()))
                     norms = torch.norm(g, dim=dims_to_reduce, keepdim=True) + 1e-6  #avoid div by 0
-                    g *= self.gradient_norm / torch.norm(g).item()
+                    g *= self.gradient_norm / (torch.norm(g).item() + 1e-6)
                     
                     
                     # print(f'size of gradient step: {torch.norm(g).item()}')

@@ -9,6 +9,21 @@ class SpecifiedPointConstraint:
             points[i] = tuple(torch.tensor(points[i][j]).to(device) for j in range(len(points[i])))
         self.shape = (60, 139) if contact else (60, 135)
         
+    def set_name(self, name):
+        self.name = name
+
+    def __str__(self):
+        if self.name is None:
+            return "SpecifiedPoint"
+        return self.name
+    
+    def constraint(self, samples):
+        loss = 0
+        for point in self.points:
+            vals = point[2].repeat(samples.shape[0])
+            loss += torch.nn.functional.mse_loss(samples[:, point[0], point[1]], vals)
+        return loss
+        
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
         # sampels should be of shape [n, 60, 139]
@@ -21,5 +36,5 @@ class SpecifiedPointConstraint:
             loss = 0
             for point in self.points:
                 vals = point[2].repeat(samples.shape[0])
-                loss -= torch.nn.functional.mse_loss(next_sample[:, point[1], point[2]], vals)
+                loss -= torch.nn.functional.mse_loss(next_sample[:, point[0], point[1]], vals)
             return torch.autograd.grad(loss, samples)[0]

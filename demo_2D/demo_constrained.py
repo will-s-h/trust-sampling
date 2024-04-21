@@ -10,6 +10,7 @@ from constraints.spiral import SpiralConstraint
 from constraints.cubic import CubicConstraint
 from constraints.circle import CircleInequality
 from constraints.polylike import PolyLikeConstraint
+from constraints.combine import Combine
 from model.model_2D import MLP
 from diffusion.diffusion import GaussianDiffusion
 from visualization.render_2D import *
@@ -45,7 +46,7 @@ def all_exps_constrained(MODEL_NAME, constraint, method, distr, distribution):
         extra_args["norm_upper_bound"] = 35
         extra_args["iterations_max"] = 5
         extra_args["gradient_norm"] = 1
-        extra_args["iteration_func"] = lambda x: 40 if x <= 10 else 5
+        extra_args["iteration_func"] = lambda x: 2
         diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"], norm_upper_bound=extra_args["norm_upper_bound"], 
                                     iterations_max=extra_args["iterations_max"], gradient_norm=extra_args["gradient_norm"])
         # diffusion.set_trust_parameters(iteration_func=lambda x: 40 if 20 <= x <= 30 else 1, norm_upper_bound=35, iterations_max=2, gradient_norm=1)
@@ -84,10 +85,10 @@ def all_exps_constrained(MODEL_NAME, constraint, method, distr, distribution):
 if __name__ == "__main__":
     # parameters
     MODEL_NAME = "spiral_base"
-    constraint = PolyLikeConstraint(1, 2, 1, 3, 3)
+    constraint = Combine(CircleInequality(1.5, 0, 1, 2), CircleInequality(1, -1, 1, 1))
     distr = "spiral"
     distribution = SpiralConstraint()
     
-    for method in ["dps", "dsg", "trust"][2:]:
+    for method in ["dps", "dsg", "trust"]:
         all_exps_constrained(MODEL_NAME, constraint, method, distr, distribution)
         print()

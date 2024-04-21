@@ -1,12 +1,13 @@
 import torch
 from .constraint import Constraint
+from .circle import CircleInequality
 
 class Combine(Constraint):
     '''
-    Constraint where anything within distance r of x and y is valid
+    Combine two constraints by adding their gradients
     '''
     
-    def __init__(self, c1, c2):
+    def __init__(self, c1: Constraint, c2: Constraint):
         super().__init__()
         self.c1 = c1
         self.c2 = c2
@@ -16,14 +17,17 @@ class Combine(Constraint):
     
     def constraint(self, samples: torch.FloatTensor) -> torch.FloatTensor:
         super()._check_dim(samples)
-        return self.relu((samples[..., 0]-self.x) ** 2 + (samples[..., 1]-self.y) ** 2 - self.rsq) * self.slope
+        return self.c1.constraint(samples) + self.c2.constraint(samples)
     
     def gradient(self, samples: torch.FloatTensor, func = None) -> torch.FloatTensor:
-        samples = samples.clone()
-        samples[..., 0] -= self.x
-        samples[..., 1] -= self.y
-        norms = torch.norm(samples, dim=1)
-        samples[norms < self.rsq] = 0.0
-        return -(samples.T / norms).T 
+        return self.c1.gradient(samples, func) + self.c2.gradient(samples, func)
+
+    def plot(self, fig, ax):
+        if type(self.c1) == CircleInequality and type(self.c2) == CircleInequality:
+            fig, ax = self.c1.plot(fig, ax, color='red')
+            fig, ax = self.c2.plot(fig, ax, color='orange')
+            return fig, ax
+        else:
+            raise NotImplementedError("Unknown configuration of constraints")
     
         
