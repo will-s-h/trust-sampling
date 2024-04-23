@@ -169,6 +169,7 @@ def skeleton_render(
     out="renders",
     contact=None,
     colors=None,
+    constraint=None,
 ):
     # generate the pose with FK
     Path(out).mkdir(parents=True, exist_ok=True)
@@ -197,9 +198,11 @@ def skeleton_render(
     ]
     axrange = 3
 
-    # add text, colors
+    # add text, colors, constraint
     text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
     colors = colors if isinstance(colors, dict) else {}
+    if constraint is not None and hasattr(constraint, "plot"):
+        constraint.plot(fig, ax)
 
     # create contact labels
     if contact is None:
@@ -308,7 +311,8 @@ def just_render_simple(
     model_output,
     normalizer,
     render_out,
-    colors=None):
+    colors=None,
+    constraint=None):
     
     samples = model_output
     samples = normalizer.unnormalize(samples)
@@ -338,10 +342,14 @@ def just_render_simple(
             pose,
             out=render_out,
             contact=contact,
-            colors=colors
+            colors=colors,
+            constraint=constraint
         )
 
-    p_map(inner, enumerate(poses))
+    for xx in enumerate(poses):
+        inner(xx)
+        
+    # p_map(inner, enumerate(poses))
     
 
 #### trajectory animation across diffusion time (see how trajectory changes over diffusion t)
