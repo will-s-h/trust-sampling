@@ -49,7 +49,7 @@ def main(opt):
     extra_args = {}
     
     if opt.method == "dps":
-        extra_args["weight"] = 0.5
+        extra_args["weight"] = 0.1
         samples = model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, weight=extra_args["weight"])
     elif opt.method == "dsg":
         extra_args["gr"] = 0.1
@@ -111,20 +111,20 @@ if __name__ == "__main__":
     # const.set_name("specified_jump")
     # opt.constraint = const
     
-    # points = [(0, "lwrist", 0.0, 0.0, 1.5), (30, "lwrist", 0.0, 1.0, 1.5), (59, "lwrist", 1.0, 1.0, 1.5)]
-    # const = EndEffectorConstraint(points=points)
-    # const.set_name("lwrist")
-    # opt.constraint = const
+    points = [(0, "lwrist", 0.0, 0.0, 1.5), (30, "lwrist", 0.0, 1.0, 1.5), (59, "lwrist", 1.0, 1.0, 1.5)]
+    const = EndEffectorConstraint(points=points)
+    const.set_name("lwrist_ablation")
+    opt.constraint = const
     
     # points = [(0, "rankle", 0.0, 0.0, 0.0), (30, "rankle", 0.0, 1.0, 1.5)]
     # const = EndEffectorConstraint(points=points)
     # const.set_name("rankle")
     # opt.constraint = const
     
-    const = KineticEnergyConstraint(KE=0)
-    const.set_name("KE=0")
-    opt.constraint = const
+    # const = KineticEnergyConstraint(KE=0)
+    # const.set_name("KE=0")
+    # opt.constraint = const
     
-    for method in ["dps", "dsg", "trust"]:
+    for method in ["dps", "dsg", "trust"][2:]:
         opt.method = method
         main(opt)
