@@ -87,9 +87,18 @@ class EndEffectorConstraint:
         poses = self.samples_to_poses(samples)
         for point in self.points:
             for dim in range(3): # x, y, and z
-                vals = point[dim+2].repeat(poses.shape[0]) 
+                vals = point[dim+2].repeat(poses.shape[0])
                 loss += torch.nn.functional.mse_loss(poses[:, point[0], point[1], dim], vals)
         return loss
+
+    def constraint_metric(self, samples):
+        loss = torch.zeros((samples.shape[0],), device=self.device)
+        poses = self.samples_to_poses(samples)
+        for point in self.points:
+            for dim in range(3): # x, y, and z
+                vals = point[dim+2].repeat(poses.shape[0])
+                loss += torch.square(poses[:, point[0], point[1], dim]- vals)
+        return loss / len(self.points) / 3
         
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
