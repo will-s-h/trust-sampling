@@ -45,7 +45,7 @@ class GaussianDiffusion(nn.Module):
         
         betas = torch.Tensor(
             make_beta_schedule(schedule=schedule, n_timestep=n_timestep)
-        )
+        ).to(dtype=torch.float64)
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, axis=0)
         alphas_cumprod_prev = torch.cat([torch.ones(1), alphas_cumprod[:-1]])
@@ -109,15 +109,15 @@ class GaussianDiffusion(nn.Module):
             otherwise, model predicts x0 directly
         """
         return (
-            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
-            - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
+            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape).to(dtype=torch.float32) * x_t
+            - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape).to(dtype=torch.float32) * noise
         )
         
     # predict epsilon from x0
     def predict_noise_from_start(self, x_t, t, x0):
         return (
-            (extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0) / \
-            extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
+            (extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape).to(dtype=torch.float32) * x_t - x0) / \
+            extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape).to(dtype=torch.float32)
         )
     
     # predict epsilon and x0 from x_t
@@ -127,8 +127,8 @@ class GaussianDiffusion(nn.Module):
         # In the case of "learned" variance, model will give twice channels.
         if model_output.shape[1] == 2 * x.shape[1] and self.learned_variance:
             model_output, model_var_values = torch.split(model_output, x.shape[1], dim=1)
-            min_log = extract(self.posterior_log_variance_clipped_, t, x.shape)
-            max_log = extract(torch.log(self.betas), t, x.shape)
+            min_log = extract(self.posterior_log_variance_clipped_, t, x.shape).to(dtype=torch.float32)
+            max_log = extract(torch.log(self.betas), t, x.shape).to(dtype=torch.float32)
             frac = (model_var_values + 1.0) / 2.0
             model_log_variance = frac * max_log + (1 - frac) * min_log
         
@@ -213,13 +213,13 @@ class GaussianDiffusion(nn.Module):
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
             # produce a bunch of times, for each of the samples in the batch
-            time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
+            time_cond = torch.full((batch,), time, device=device)
             
             # predict completely denoised product
             pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
-
+            
             if time_next < 0:
-                x = x_start
+                x = x_start.detach()
                 continue
             
             # apply diffusion noise again, except with one less step of noise than what was denoised.
@@ -230,14 +230,13 @@ class GaussianDiffusion(nn.Module):
             c = (1 - alpha_next - sigma ** 2).sqrt()
 
             noise = torch.randn_like(x)
-
-            x = x_start * alpha_next.sqrt() + \
-                  c * pred_noise + \
+            x = x_start.detach() * alpha_next.sqrt() + \
+                  c * pred_noise.detach() + \
                   sigma * noise
                   
             # DPS gradient correction:
-            g = constraint_obj.gradient(x_start, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-            norms = torch.norm(g.view(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
+            g = constraint_obj.gradient(x_start, lambda x_t: self.model_predictions(x_t, time_cond, clip_x_start=self.clip_denoised))
+            norms = torch.norm(g.reshape(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
             g *= weight / norms
             x += g  # note that the negative sign is included in the .gradient function, in our formulation
             
@@ -309,6 +308,7 @@ class GaussianDiffusion(nn.Module):
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+        reduce_dims, ones = tuple([i for i in range(1, len(shape))]), tuple([1 for i in range(1, len(shape))])
         
         x = torch.randn(shape, device = device)
 
@@ -332,53 +332,54 @@ class GaussianDiffusion(nn.Module):
                 if debug: traj.append((self._get_trajectory(x_start), time, 'diffusion step'))
                 if time_next < 0:
                     pred_noise, *_ = self.model_predictions(x_start, time_cond, clip_x_start = self.clip_denoised)
-                    # print(f'final norm: {torch.norm(pred_noise).item()}')
                     if save_intermediates: intermediates.append(x_start)
                     x = x_start
                     break
                 
-                # apply diffusion noise again, except with one less step of noise than what was denoised.
+                # regular DDIM step, except don't apply noise yet
                 alpha = self.alphas_cumprod[time]
                 alpha_next = self.alphas_cumprod[time_next]
-
                 sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
                 c = (1 - alpha_next - sigma ** 2).sqrt()
-
                 noise = torch.randn_like(x)
-                
-                #### new stuff
                 model_mean = x_start * alpha_next.sqrt() + c * pred_noise
+                
+                #### KEY PORTION: TRUST SAMPLING ####
+                
                 new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
+                pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                 neural_function_evals += 1
-                # print(f'reached norm: {torch.norm(new_pred_noise).item()}')
                 j = 0
                 
-                while j < self.iterations_max and torch.norm(new_pred_noise).item() <= self.norm_upper_bound:
-                    # const = c * extract(self.sqrt_one_minus_alphas_cumprod, time_cond, x.shape)
+                # while any sample is within trust region
+                while j < self.iterations_max and torch.min(pred_noise_norms).item() <= self.norm_upper_bound:
+                    # calculate gradients
                     g = constraint_obj.gradient(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-                    norms = torch.norm(g.view(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
-                    # print(f'time: {time}, gradient norm before normalization: {torch.norm(g).item()}')
+                    
+                    # calculate norms to divide g by, for each sample
+                    norms = (torch.norm(g.view(g.shape[0], -1), dim=1)).view((g.shape[0],) + ones).expand(g.shape) + 1e-6  # avoid div by 0
+                    
+                    # normalize g
                     g *= self.gradient_norm / norms
-                    # g *= self.gradient_norm / torch.norm(g).item()
                     
-                    
-                    # print(f'size of gradient step: {torch.norm(g).item()}')
+                    # zero out the gradient of samples that are outside of the trust region
+                    g *= (pred_noise_norms <= self.norm_upper_bound).int().view((-1,) + ones)
+
+                    # update model_mean
                     model_mean = model_mean + g
+                    
+                    # update variables for next iteration of loop
                     if debug: traj.append((self._get_trajectory(model_mean), time, 'gradient step'))
-                    j += 1
                     new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
+                    pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                     neural_function_evals += 1
-
-                x = model_mean + sigma * noise
-                # new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
-                if debug: traj.append((self._get_trajectory(x), time, 'noise'))
-                # print(f'{j} iterations, reached norm: {torch.norm(new_pred_noise).item()}')
+                    j += 1
+                    
+                #####################################
                 
-                #### next stuff
-
-                # x = x_start * alpha_next.sqrt() + \
-                #     c * pred_noise + \
-                #     sigma * noise
+                x = model_mean + sigma * noise
+                if debug: traj.append((self._get_trajectory(x), time, 'noise'))
+                
             if save_intermediates: intermediates.append(x)
         
         print(f"neural evaluations: {neural_function_evals}")

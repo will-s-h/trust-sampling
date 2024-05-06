@@ -13,6 +13,7 @@ from constraints.trajectory_constraint import TrajectoryConstraint
 from constraints.specified_points import SpecifiedPointConstraint
 from constraints.end_effector import EndEffectorConstraint
 from constraints.kinetic_energy import KineticEnergyConstraint
+from constraints.combine import Combine
 from evaluator import get_all_metrics
 
 X_START, Y_START = -0.107, -0.1545
@@ -32,11 +33,18 @@ def main(opt):
         print('Model loaded.')
         print('**********************\n')
     
-    if type(opt.constraint) == TrajectoryConstraint:
-        opt.constraint.set_normalizer(model.normalizer)
-    if type(opt.constraint) == EndEffectorConstraint or type(opt.constraint) == KineticEnergyConstraint:
-        opt.constraint.set_normalizer(model.normalizer)
-        opt.constraint.set_smpl(model.smpl)
+    list_constraints = []
+    if type(opt.constraint) == Combine:
+        list_constraints = [opt.constraint.c1, opt.constraint.c2]
+    else:
+        list_constraints = [opt.constraint]
+        
+    for const in list_constraints:
+        if type(const) == TrajectoryConstraint:
+            const.set_normalizer(model.normalizer)
+        if type(const) == EndEffectorConstraint or type(const) == KineticEnergyConstraint:
+            const.set_normalizer(model.normalizer)
+            const.set_smpl(model.smpl)
     
     motion_dir = os.path.join(opt.motion_save_dir, f"{opt.model_name}_{opt.constraint}/{opt.method}")
     if not os.path.isdir(motion_dir): os.makedirs(motion_dir)
@@ -49,9 +57,11 @@ def main(opt):
     extra_args = {}
     
     if opt.method == "dps":
-        extra_args["weight"] = 0.1
+        NUM_TIMESTEPS = 250
+        extra_args["weight"] = 0.3
         samples = model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, weight=extra_args["weight"])
     elif opt.method == "dsg":
+        NUM_TIMESTEPS = 250
         extra_args["gr"] = 0.1
         samples = model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, gr=extra_args["gr"])
     elif opt.method == "trust":
@@ -60,7 +70,7 @@ def main(opt):
         extra_args["gradient_norm"] = 1
         extra_args["iteration_func"] = lambda time_next: 1 # 1
         model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"], norm_upper_bound=extra_args["norm_upper_bound"], iterations_max=extra_args["iterations_max"], gradient_norm=extra_args["gradient_norm"])
-        samples, traj_found = model.diffusion.trust_sample(shape, constraint_obj=opt.constraint, debug=True)
+        samples, traj_found = model.diffusion.trust_sample(shape, constraint_obj=opt.constraint, sample_steps=NUM_TIMESTEPS, debug=True)
         
     print(f'Finished generating trust samples.')
     if opt.save_motions: 
@@ -111,20 +121,31 @@ if __name__ == "__main__":
     # const.set_name("specified_jump")
     # opt.constraint = const
     
-    points = [(0, "lwrist", 0.0, 0.0, 1.5), (30, "lwrist", 0.0, 1.0, 1.5), (59, "lwrist", 1.0, 1.0, 1.5)]
-    const = EndEffectorConstraint(points=points)
-    const.set_name("lwrist_ablation")
-    opt.constraint = const
+    # points = [(0, "lwrist", 0.0, 0.0, 1.5), (30, "lwrist", 0.0, 1.0, 1.5), (59, "lwrist", 1.0, 1.0, 1.5)]
+    # const = EndEffectorConstraint(points=points)
+    # const.set_name("lwrist_ablation")
+    # opt.constraint = const
     
     # points = [(0, "rankle", 0.0, 0.0, 0.0), (30, "rankle", 0.0, 1.0, 1.5)]
     # const = EndEffectorConstraint(points=points)
     # const.set_name("rankle")
     # opt.constraint = const
     
-    # const = KineticEnergyConstraint(KE=0)
-    # const.set_name("KE=0")
+    # const = KineticEnergyConstraint(KE=30)
+    # const.set_name("KE=30")
     # opt.constraint = const
     
-    for method in ["dps", "dsg", "trust"][2:]:
+    const = Combine(
+        EndEffectorConstraint(points=[
+            (29, "head", 0.0, 1.0, 0.5),
+            (30, "head", 0.0, 1.0, 0.5),
+            (31, "head", 0.0, 1.0, 0.5)
+        ]),
+        KineticEnergyConstraint(KE=10)
+    )
+    const.set_name("cartwheel_please")
+    opt.constraint = const
+    
+    for method in ["dps", "dsg", "trust"][0:2]:
         opt.method = method
         main(opt)
