@@ -131,7 +131,8 @@ def main_end_effector_control(opt):
                 render_to_compare(model.smpl, render_samples, model.normalizer, render_out=render_dir,
                                              constraint=None)
 
-
+            if opt.get_metrics:
+                get_all_metrics_(opt)
             # if opt.method == "trust":
             #     print(f'Rendering trajectory changes...')
             #     ani = trajectory_animation(traj_found, traj)
@@ -208,7 +209,8 @@ def main_root_control(opt):
                 render_samples = torch.stack([sample, sample_gt.to(sample.device)])
                 render_to_compare(model.smpl, render_samples, model.normalizer, render_out=render_dir,
                                              constraint=None)
-
+        if opt.get_metrics:
+            get_all_metrics_(opt)
 
             # if opt.method == "trust":
             #     print(f'Rendering trajectory changes...')
@@ -221,16 +223,14 @@ def main_root_control(opt):
 if __name__ == "__main__":
 
 
-
+    # GENERAL SETTINGS
     opt = parse_test_opt()
     opt.save_motions = True
     opt.no_render = False
     opt.predict_contact = True
     opt.checkpoint = "../runs/motion/exp4-train-4950.pt"
     opt.model_name = "fixes_4950"
-    NUM_TIMESTEPS = [50, 200, 1000]
-    opt.batch_size = 30
-    max_norms = [[80, 82], [88, 88.5]]
+    opt.batch_size = 60
     print('**********************')
     print('Loading model...')
     model = MotionWrapper(opt.checkpoint, predict_contact=opt.predict_contact)
@@ -239,46 +239,49 @@ if __name__ == "__main__":
     print('Model loaded.')
     print('**********************\n')
 
-
+    # GT MOTIONS
+    opt.nr_test_motions = 480
     opt.gt_motions_path = os.path.join(main_path, 'data', 'AMASS_test_aggregated_sliced')
+    opt.gt_motions_files = os.listdir(opt.gt_motions_path)[:opt.nr_test_motions]
 
-    # get list of gt motions files
-    opt.gt_motions_files = os.listdir(opt.gt_motions_path)[:480]
+    # TEST SETTINGS
+    opt.control_name = "root_control" # or "end_effector_foot_hand"
+    opt.get_metrics = False
+    NUM_TIMESTEPS = [50, 200, 1000] # 1000 will be ignored for trust sampling
+    max_norms = [[80, 82], [88, 88.5]] # provide different max norms per NUM_TIMESTEPS you want to try
+    opt.max_norm_original = 80 # Need to specify for fair comparison in metrics
 
-
-    # root control
-    # We provide the 3D root trajectory during the full 3s as a constraint
-    opt.control_name = "long_form"
+    # SAVE SETTINGS
     opt.motion_save_dir = "./motions/" + opt.control_name
     opt.render_dir = "renders/" + opt.control_name
-    opt.file_path = "all_motion_experiments.csv"
+    opt.file_path = opt.control_name + ".csv"
     opt.auto_save = True
-    opt.max_norm_original = 80
+
     for i, NUM_TIMESTEP in enumerate(NUM_TIMESTEPS):
         opt.NUM_TIMESTEPS = NUM_TIMESTEP
-        for method in ["dps", "dsg", "trust"][1:2]:
+        for method in ["dps", "dsg", "trust"][1:]:
             if method == 'trust' and NUM_TIMESTEP < 201:
                 for max_norm in max_norms[i]:
                     opt.max_norm = max_norm
                     opt.method = method
-                    # opt.generated_motions_path = os.path.join(opt.motion_save_dir,
-                    #                                           f"{opt.method}" + str(opt.NUM_TIMESTEPS) + '_' + str(
-                    #                                               opt.max_norm))
-                    # opt.generated_motion_files = os.listdir(os.path.join(opt.motion_save_dir, f"{opt.method}" + str(
-                    #     opt.NUM_TIMESTEPS) + '_' + str(opt.max_norm)))
-                    main_long_form_control(opt)
-                    # get_all_metrics_(opt)
+                    opt.generated_motions_path = os.path.join(opt.motion_save_dir,
+                                                              f"{opt.method}" + str(opt.NUM_TIMESTEPS) + '_' + str(
+                                                                  opt.max_norm))
+                    opt.generated_motion_files = os.listdir(os.path.join(opt.motion_save_dir, f"{opt.method}" + str(
+                        opt.NUM_TIMESTEPS) + '_' + str(opt.max_norm)))
+                    if opt.control_name == "root_control":
+                        main_root_control(opt)
+                    elif opt.control_name == "end_effector_foot_hand":
+                        main_end_effector_control(opt)
             elif method != "trust":
                 opt.method = method
-                # opt.generated_motions_path = os.path.join(opt.motion_save_dir, f"{opt.method}" + str(opt.NUM_TIMESTEPS))
-                # opt.generated_motion_files = os.listdir(
-                #     os.path.join(opt.motion_save_dir, f"{opt.method}" + str(opt.NUM_TIMESTEPS)))
-                # get_all_metrics_(opt)
-                main_long_form_control(opt)
-
-                # main_end_effector_control(opt)
-            # main_root_control(opt)
-
+                opt.generated_motions_path = os.path.join(opt.motion_save_dir, f"{opt.method}" + str(opt.NUM_TIMESTEPS))
+                opt.generated_motion_files = os.listdir(
+                    os.path.join(opt.motion_save_dir, f"{opt.method}" + str(opt.NUM_TIMESTEPS)))
+                if opt.control_name == "root_control":
+                    main_root_control(opt)
+                elif opt.control_name == "end_effector_foot_hand":
+                    main_end_effector_control(opt)
 
 
-                # get_all_metrics_(opt)
+

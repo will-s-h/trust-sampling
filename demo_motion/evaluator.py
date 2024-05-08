@@ -101,8 +101,8 @@ def get_all_metrics_(opt):
     exp_name = opt.control_name + f"{opt.method}" + str(opt.NUM_TIMESTEPS)
     batch_size = opt.batch_size
 
-    gt_motions_files = opt.gt_motions_files[:480]
-    generated_motion_files = opt.generated_motion_files[:480]
+    gt_motions_files = opt.gt_motions_files[:opt.nr_test_motions]
+    generated_motion_files = opt.generated_motion_files[:opt.nr_test_motions]
     c_values = []
     rms_pred_noise = []
     for index in tqdm(range(0, len(generated_motion_files), batch_size)):
