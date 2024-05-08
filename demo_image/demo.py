@@ -9,11 +9,13 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
+from PIL import Image
 from model.unet import create_model
 from diffusion.diffusion import GaussianDiffusion
 from constraints.SuperResolution import SuperResolutionConstraint
 from constraints.Inpaint import InpaintConstraint
 from constraints.GaussianDeblur import GaussianBlurConstraint
+from constraints.Sketch import FaceSketchConstraint
 
 def load_yaml(file_path: str) -> dict:
     with open(file_path) as f:
@@ -43,26 +45,29 @@ def all_image_paths(directory):
     return paths
 
 def main(args):
-    model_config = load_yaml(f"./ffhq_model_config.yaml")
+    model_config = load_yaml("./ffhq_model_config.yaml" if args.model == "ffhq" else "./imagenet_model_config.yaml")
     model = create_model(**model_config).to('cuda')
 
     all_paths = all_image_paths(args.dataset_path)
-    batch_size = 4
-    # masks = torch.load('../dataset/masks.pt')
+    batch_size = 1
+    if args.constraint == "inpaint":
+        masks = torch.load('../dataset/masks.pt')
+    
+    avg_nfes = 0
     
     for j in range(len(all_paths) // batch_size):
         paths = all_paths[j * batch_size : (j+1) * batch_size]
         
-        # Inpaint Constraint
-        # mask = masks[j * batch_size : (j+1) * batch_size].squeeze(1)
-        # const = InpaintConstraint(paths, mask=mask)
-        
-        # SuperResolutionConstraint
-        # const = SuperResolutionConstraint(paths, scale_factor=4)
-        
-        # Gaussian Deblur Constraint
-        const = GaussianBlurConstraint(paths, 61, 3.0)
-        
+        if args.constraint == "super_resolution":
+            const = SuperResolutionConstraint(paths, scale_factor=4)
+        elif args.constraint == "inpaint":
+            mask = masks[j * batch_size : (j+1) * batch_size].squeeze(1)
+            const = InpaintConstraint(paths, mask=mask)
+        elif args.constraint == "gaussian_deblur":
+            const = GaussianBlurConstraint(paths, 61, 3.0)
+        elif args.constraint == "face_sketch":
+            const = FaceSketchConstraint(paths)
+            
         SAMPLE_STEPS = 200
         NUM_SAMPLES = len(paths)
         SHAPE = (NUM_SAMPLES, 3, 256, 256)
@@ -81,25 +86,27 @@ def main(args):
             extra_args["gradient_norm"] = args.gradient_norm
             extra_args["iteration_func"] = lambda time_next: 1 # 1
             diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"], norm_upper_bound=extra_args["norm_upper_bound"], iterations_max=extra_args["iterations_max"], gradient_norm=extra_args["gradient_norm"])
-            samples = diffusion.trust_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const)
+            samples, nfes = diffusion.trust_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, debug=True)
+            avg_nfes += nfes / (len(all_paths) // batch_size)
 
         # plot all experiments
-        save_dir = f"plots/{const}/{args.dataset_name}_{args.method}"
+        save_dir = f"experiments/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
         if not os.path.exists(save_dir): os.makedirs(save_dir)
 
         for i, sample in enumerate(samples):
             plt.imsave(f'{save_dir}/result{j*batch_size + i:05}.png', clear_color(sample))
+    
+    print(f'average NFEs: {avg_nfes}')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", type=str, default="trust")
+    parser.add_argument("--model", type=str, default="ffhq")
+    parser.add_argument("--constraint", type=str, default="super_resolution")
     parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")
     parser.add_argument("--dataset_name", type=str, default="ffhq")
     parser.add_argument("--norm_upper_bound", type=float, default=440)
     parser.add_argument("--iterations_max", type=int, default=5)
     parser.add_argument("--gradient_norm", type=float, default=1)
     args = parser.parse_args()
-    args.norm_upper_bound=440
-    args.iterations_max=5
-    args.gradient_norm=1
     main(args)
