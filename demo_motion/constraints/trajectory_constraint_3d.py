@@ -24,10 +24,13 @@ class TrajectoryConstraint3D:
         return self.name
 
     def constraint(self, samples):
-        if samples.dim() == 2:
-            return torch.sum((samples[..., self.root_slice] - self.traj) ** 2)
-        return torch.mean(
-            torch.mean((samples[..., self.root_slice] - self.traj.repeat(samples.shape[0], 1, 1)) ** 2, dim=-1), dim=-1)
+        # if samples.dim() == 2:
+        #     return torch.sum((samples[..., self.root_slice] - self.traj) ** 2)
+        # return torch.mean(
+        #     torch.mean((samples[..., self.root_slice] - self.traj.repeat(samples.shape[0], 1, 1)) ** 2, dim=-1), dim=-1)
+        loss = torch.sqrt(torch.mean(torch.mean(torch.square(samples[..., self.root_slice] - self.traj), dim=-1),
+                    dim=-1))
+        return loss
 
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)

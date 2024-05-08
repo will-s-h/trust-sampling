@@ -8,6 +8,7 @@ from einops import reduce
 from model.motion_wrapper import MotionWrapper, SMPLSkeleton, ax_from_6v
 from motion_args import parse_test_opt
 from constraints.trajectory_constraint import TrajectoryConstraint
+from constraints.trajectory_constraint_3d import TrajectoryConstraint3D
 from constraints.specified_points import SpecifiedPointConstraint
 from constraints.end_effector import EndEffectorConstraint
 from constraints.kinetic_energy import KineticEnergyConstraint
@@ -94,14 +95,83 @@ def get_EDGE_PFC(samples: np.ndarray):
     PFC_mean = np.mean(PFC, axis=1) * 1e4 #scaling as in EDGE
     return PFC_mean
 
-# def multivariate_gaussian_log_likelihood(sample, mean, covariance):
-#     k = mean.shape[0]  # Dimensionality of the multivariate Gaussian
-#     det = torch.det(covariance)
-#     inv_covariance = torch.inverse(covariance)
-#     exponent = -0.5 * torch.matmul(torch.matmul((sample - mean).T, inv_covariance), (sample - mean))
-#     constant_term = -0.5 * k * torch.log(torch.tensor(2 * torch.pi))
-#     log_likelihood = constant_term - 0.5 * torch.log(det) + exponent
-#     return log_likelihood
+def get_all_metrics_(opt):
+    from tqdm import tqdm
+    model = opt.model
+    exp_name = opt.control_name + f"{opt.method}" + str(opt.NUM_TIMESTEPS)
+    batch_size = opt.batch_size
+
+    gt_motions_files = opt.gt_motions_files[:480]
+    generated_motion_files = opt.generated_motion_files[:480]
+    c_values = []
+    rms_pred_noise = []
+    for index in tqdm(range(0, len(generated_motion_files), batch_size)):
+        # GT motions
+        sublist = generated_motion_files[index:index + batch_size]
+        samples_normalized_generated = torch.stack(
+            [torch.load(os.path.join(opt.generated_motions_path, file)) for file in sublist])
+        samples_generated = opt.model.normalizer.unnormalize(samples_normalized_generated)
+
+        gt_samples = torch.stack([torch.load(os.path.join(opt.gt_motions_path, file)) for file in sublist])
+        # add dummy contact
+        if gt_samples.shape[2] == 135:
+            gt_samples = torch.cat([torch.zeros(gt_samples.shape[0], gt_samples.shape[1], 4), gt_samples, ], dim=2)
+        gt_root = gt_samples[:, :, 4:4 + 3]  # first 4 are contact labels
+
+
+        # Constraint
+        controlled_joint_indices = [0]
+        const = TrajectoryConstraint3D(traj=gt_root, controlled_joint_indices=controlled_joint_indices)
+        opt.constraint = const
+        c_values.append(opt.constraint.constraint(samples_generated).cpu().numpy())
+
+        # error predicted by model
+        time_cond = torch.full((samples_normalized_generated.shape[0],), 1, device=samples_normalized_generated.device, dtype=torch.long)
+        pred_noise, *_ = model.diffusion.model_predictions(samples_normalized_generated, time_cond,
+                                                           clip_x_start=opt.model.diffusion.clip_denoised)
+        rms_pred_noise.append(torch.norm(pred_noise, dim=(-2, -1)).detach().cpu().numpy())
+        print()
+
+    c_values = np.concatenate(c_values)
+    rms_pred_noise = np.concatenate(rms_pred_noise)
+    constraint_metrics = {
+        "method": opt.method,
+        "ddim steps": opt.NUM_TIMESTEPS,
+        "f_eval": opt.NUM_TIMESTEPS * 4 if opt.method == 'trust' else opt.NUM_TIMESTEPS,
+        "max_norm": opt.max_norm if opt.method == 'trust' else opt.max_norm_original,
+        "constraint mean": np.mean(c_values),
+        "constraint std": np.std(c_values),
+        "constraint 95perc": np.percentile(c_values,95)
+    }
+
+    distr_metrics = {
+    "norm_pred_noise": np.mean(rms_pred_noise).item() / opt.max_norm_original,
+    "norm_pred_noise_std": np.std(rms_pred_noise).item()/ opt.max_norm_original,
+    "norm_pred_noise_95perc": np.percentile(rms_pred_noise,95).item()/ opt.max_norm_original,
+    "norm_pred_noise_5perc": np.percentile(rms_pred_noise, 5).item()/ opt.max_norm_original,
+    }
+
+    metrics = {
+        "constraint": constraint_metrics,
+        "distribution": distr_metrics
+    }
+
+    file_path = opt.file_path
+    if opt.auto_save:
+        # convert metrics into better format
+        better_metrics_dict = {}
+        # add experiment name as a header
+        better_metrics_dict["exp_name"] = exp_name
+        for category in metrics:
+            for metric in metrics[category]:
+                better_metrics_dict[metric] = metrics[category][metric]
+        # for arg in kwargs:
+        #     better_metrics_dict[arg] = kwargs[arg]
+        _auto_save(better_metrics_dict, file_path=file_path)
+
+
+
+
 def get_all_metrics(samples, constraint, model: MotionWrapper, exp_name=None, auto_save=True, file_path="all_motion_experiments.csv", **kwargs):
     if exp_name is None and auto_save: 
         raise ValueError("must have valid experiment name when autosaving")

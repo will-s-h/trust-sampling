@@ -43,7 +43,7 @@ def main(opt):
     samples_file = os.path.join(motion_dir, "normal_samples_tom.pt")
 
     NUM = 10
-    NUM_TIMESTEPS = 50
+    NUM_TIMESTEPS = 200
     print(f'Generating {NUM} normal sample{"" if NUM == 1 else "s"}...')
     shape = (NUM, model.horizon, model.repr_dim)
     extra_args = {}
