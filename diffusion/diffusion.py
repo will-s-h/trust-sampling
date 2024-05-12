@@ -297,11 +297,12 @@ class GaussianDiffusion(nn.Module):
             
         return intermediates if save_intermediates else x
     
-    def set_trust_parameters(self, iteration_func = None, norm_upper_bound = None, iterations_max = 1, gradient_norm = 1):
+    def set_trust_parameters(self, iteration_func = None, norm_upper_bound = None, iterations_max = 1, gradient_norm = 1, refine = True):
         self.iteration_func = iteration_func if iteration_func is not None else (lambda x: 1)
         self.norm_upper_bound = norm_upper_bound if norm_upper_bound is not None else self.get_norm_upper_bound()
         self.iterations_max = iterations_max
         self.gradient_norm = gradient_norm
+        self.refine = refine
     
     @torch.no_grad()
     def trust_sample(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False, **kwargs):
@@ -325,38 +326,56 @@ class GaussianDiffusion(nn.Module):
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
             iterations = self.iteration_func(time_next)
             for _ in range(iterations):
-                
-                # produce a bunch of times, for each of the samples in the batch
+
                 time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
-                
-                # predict completely denoised product
                 pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
                 neural_function_evals += 1
+
                 if debug: traj.append((self._get_trajectory(x_start), time, 'diffusion step'))
-                if time_next < 0:
-                    pred_noise, *_ = self.model_predictions(x_start, time_cond, clip_x_start = self.clip_denoised)
-                    # print(f'final norm: {torch.norm(pred_noise).item()}')
-                    if save_intermediates: intermediates.append(x_start)
-                    x = x_start
-                    break
+
+                if time_next < 0: # we are in the last step
+                    if self.refine :
+                        nr_refinement_steps = 0
+                        while neural_function_evals < 201:
+                            print('loss:', constraint_obj.constraint(x_start)[0].item(),'loss2:', constraint_obj.constraint(x_start)[1].item(),'loss3:', constraint_obj.constraint(x_start)[2].item())
+                            # model_mean = x_start * alpha_next.sqrt() + c * pred_noise
+                            g = constraint_obj.gradient(x, lambda x: self.model_predictions(x, time_cond,
+                                                                                                    clip_x_start=self.clip_denoised))
+                            norms = torch.norm(g.view(g.shape[0], -1), dim=1).view(
+                                (g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(
+                                g.shape) + 1e-6  # avoid div by 0
+                            g *= self.gradient_norm / norms
+                            # noise = torch.randn_like(x)
+                            # x = model_mean + 0.1 * grad_step.unsqueeze(-1).unsqueeze(-1).to('cuda') * g  #+ sigma * noise.
+                            x = x + 0.1 * g
+                            pred_noise, x_start, *_ = self.model_predictions(x, time_cond,
+                                                                             clip_x_start=self.clip_denoised)
+                            neural_function_evals += 1
+                            nr_refinement_steps += 1
+                        if save_intermediates: intermediates.append(x_start)
+                        print('loss:', constraint_obj.constraint(x_start)[0].item(), 'loss2:',
+                              constraint_obj.constraint(x_start)[1].item())
+                        x = x_start
+                        break
+                    else:
+                        pred_noise, *_ = self.model_predictions(x_start, time_cond, clip_x_start=self.clip_denoised)
+                        # print(f'final norm: {torch.norm(pred_noise).item()}')
+                        if save_intermediates: intermediates.append(x_start)
+                        x = x_start
+                        break
                 
                 # apply diffusion noise again, except with one less step of noise than what was denoised.
                 alpha = self.alphas_cumprod[time]
                 alpha_next = self.alphas_cumprod[time_next]
-
                 sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
                 c = (1 - alpha_next - sigma ** 2).sqrt()
 
-                noise = torch.randn_like(x)
-                
-                #### new stuff
                 model_mean = x_start * alpha_next.sqrt() + c * pred_noise
                 new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
-                # print(f'reached norm: {torch.norm(new_pred_noise).item()}')
-                j = 0
                 gradient_iterations = torch.zeros((batch, 1))
                 norm_noise = torch.norm(new_pred_noise, dim=(-2, -1)).cpu()
                 grad_step = (gradient_iterations < self.iterations_max).squeeze() * (norm_noise <= self.norm_upper_bound)
+
                 while grad_step.any():
                     g = constraint_obj.gradient(model_mean, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
                     norms = torch.norm(g.view(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
@@ -369,24 +388,16 @@ class GaussianDiffusion(nn.Module):
                     norm_noise = torch.norm(new_pred_noise, dim=(-2, -1)).cpu()
                     grad_step = (gradient_iterations < self.iterations_max).squeeze() * (
                                 norm_noise <= self.norm_upper_bound)
-                    print(f'denoising level: {time_cond[0]}')
-                    print(f'gradient iterations: {torch.mean(norm_noise)}')
 
-                x = model_mean  + sigma * noise
-                # new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
+                noise = torch.randn_like(x)
+                x = model_mean + sigma * noise
+
                 if debug: traj.append((self._get_trajectory(x), time, 'noise'))
-                # print(f'{j} iterations, reached norm: {torch.norm(new_pred_noise).item()}')
-                
-                #### next stuff
-
-                # x = x_start * alpha_next.sqrt() + \
-                #     c * pred_noise + \
-                #     sigma * noise
             if save_intermediates: intermediates.append(x)
         
         print(f"neural evaluations: {neural_function_evals}")
-        g = constraint_obj.gradient(x,
-                                    lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
+        # long_sample = constraint_obj.normalizer.unnormalize(constraint_obj.stack_samples(x))
+        # long_sample_before = constraint_obj.normalizer.unnormalize(constraint_obj.stack_samples(x_start_before))
         if debug: return (x, traj)
         if save_intermediates: return intermediates
 

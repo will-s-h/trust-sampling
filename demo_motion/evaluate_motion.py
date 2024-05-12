@@ -17,44 +17,7 @@ from constraints.long_form_motion import LongFormMotion
 from evaluator import get_all_metrics_
 from tqdm import tqdm
 
-def main_long_form_control(opt):
-    batch_size = opt.batch_size
-    NUM_TIMESTEPS = opt.NUM_TIMESTEPS
-    gt_motions_files = opt.gt_motions_files
-    shape = (5, 60, 139)
-    const = LongFormMotion(shape[0])
-    const.set_normalizer(opt.model.normalizer)
-    opt.constraint = const
 
-    extra_args = {}
-    if opt.method == "dps":
-        extra_args["weight"] = 0.1
-        samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 weight=extra_args["weight"])
-    elif opt.method == "dsg":
-        extra_args["gr"] = 0.1
-        samples = opt.model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 gr=extra_args["gr"])
-    elif opt.method == "trust":
-        extra_args["norm_upper_bound"] = opt.max_norm
-        extra_args["iterations_max"] = 5
-        extra_args["gradient_norm"] = 1
-        extra_args["iteration_func"] = lambda time_next: 1  # 1
-        opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
-                                                 norm_upper_bound=extra_args["norm_upper_bound"],
-                                                 iterations_max=extra_args["iterations_max"],
-                                                 gradient_norm=extra_args["gradient_norm"])
-        samples, traj_found = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS,
-                                                           constraint_obj=opt.constraint, debug=True)
-
-        long_sample = const.stack_samples(samples)
-        render_name = os.path.join(opt.render_dir, f"{opt.method}" + str(opt.NUM_TIMESTEPS)+ '_' +str(opt.max_norm))
-        just_render_simple(
-            opt.model.smpl,
-        long_sample,
-        opt.model.normalizer,
-        render_name)
-        print()
 
 
 def main_end_effector_control(opt):

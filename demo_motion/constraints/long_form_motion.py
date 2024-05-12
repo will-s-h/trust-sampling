@@ -3,7 +3,7 @@ import numpy as np
 
 
 class LongFormMotion:
-    def __init__(self, number_of_windows, number_of_overlapping_frames = 5,contact=True, device='cuda'):
+    def __init__(self, number_of_windows, target,  number_of_overlapping_frames = 5,contact=True, device='cuda'):
         self.number_of_windows = number_of_windows
         self.number_of_overlapping_frames = number_of_overlapping_frames
         self.device = device
@@ -14,6 +14,10 @@ class LongFormMotion:
 
         self.additional_constraint_1 = False #"covered_distance"
         self.additional_constraint_2 = False # stay in square
+        self.additional_constraint_3 = True # begin-end location
+        self.x_target = target[0].to(device)
+        self.y_target = target[1].to(device)
+
 
     def set_name(self, name):
         self.name = name
@@ -27,13 +31,28 @@ class LongFormMotion:
         return self.name
 
     def constraint(self, samples):
-        # if samples.dim() == 2:
-        #     return torch.sum((samples[..., self.root_slice] - self.traj) ** 2)
-        # return torch.mean(
-        #     torch.mean((samples[..., self.root_slice] - self.traj.repeat(samples.shape[0], 1, 1)) ** 2, dim=-1), dim=-1)
-        loss = torch.sqrt(torch.mean(torch.mean(torch.square(samples[..., self.root_slice] - self.traj), dim=-1),
-                    dim=-1))
-        return loss
+        end_slices = samples[:-1, -self.number_of_windows:, :]
+        start_slices = samples[1:, :self.number_of_windows, :]
+
+        if self.contact:
+            end_slices[..., 4] = end_slices[..., 4] - end_slices[:, 0, 4].unsqueeze(-1) + self.x_offset_normalized
+            end_slices[..., 5] = end_slices[..., 5] - end_slices[:, 0, 5].unsqueeze(-1) + self.y_offset_normalized
+        else:
+            raise NotImplementedError("Non-contact case not implemented yet")
+        stacked_samples = self.stack_samples(samples)
+        unnorm_samples = self.normalizer.unnormalize(stacked_samples)
+        x_start = unnorm_samples[:, 0, 4]
+        y_start = unnorm_samples[:, 0, 5]
+        x_end = unnorm_samples[:, -1, 4]
+        y_end = unnorm_samples[:, -1, 5]
+
+        loss_additional_constraint_3 = -torch.square(x_start) - torch.square(y_start) - torch.square(
+            x_end - self.x_target) - torch.square(y_end - self.y_target)
+
+
+
+        loss = -torch.nn.functional.mse_loss(start_slices, end_slices)
+        return loss, loss_additional_constraint_3
 
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
@@ -89,7 +108,21 @@ class LongFormMotion:
                 loss_additional_constraint_2 = - torch.square(x[-1]) - torch.square(y[-1])
                 print(loss_additional_constraint_2)
 
-            return (torch.autograd.grad(loss + loss_additional_constraint_1 + 10*loss_additional_constraint_2, samples)[0] / loss * loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
+            loss_additional_constraint_3 = 0
+            if self.additional_constraint_3:
+                stacked_samples = self.stack_samples(clean_samples)
+                unnorm_samples = self.normalizer.unnormalize(stacked_samples)
+                x_start = unnorm_samples[:, 0, 4]
+                y_start = unnorm_samples[:, 0, 5]
+                x_end = unnorm_samples[:, -1, 4]
+                y_end = unnorm_samples[:, -1, 5]
+
+                loss_additional_constraint_3 = -torch.square(x_start) - torch.square(y_start) - torch.square(x_end - self.x_target) - torch.square(y_end - self.y_target)
+
+                # grad_additional_constraint_3 = torch.autograd.grad(loss_additional_constraint_3, samples)[0]
+
+            grad = torch.autograd.grad(loss + 0.01*loss_additional_constraint_3 , samples)[0] #/ loss * loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
+            return grad
             # grad = []
             # for j in range(loss.shape[0]):
             #     grad.append(torch.autograd.grad(loss[j], samples, retain_graph=True)[0][j,...])

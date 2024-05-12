@@ -179,7 +179,7 @@ def plot_two_poses(num, poses, lines, ax, axrange, scat, contact, text, colors):
         ax.set_zlim(z_min, z_max)
 
 
-def plot_single_pose(num, poses, lines, ax, axrange, scat, contact, text, colors):
+def plot_single_pose(num, poses, lines, ax, axrange, scat, contact, text, colors, obstacles=None):
     pose = poses[num]
     static = contact[num]
     indices = [7, 8, 10, 11]
@@ -210,11 +210,20 @@ def plot_single_pose(num, poses, lines, ax, axrange, scat, contact, text, colors
 
         x_min, x_max = xcenter - stepx, xcenter + stepx
         y_min, y_max = ycenter - stepy, ycenter + stepy
-        z_min, z_max = zcenter - stepz, zcenter + stepz
+        # z_min, z_max = zcenter - stepz, zcenter + stepz
+        z_min, z_max = 0, 3
+
 
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
         ax.set_zlim(z_min, z_max)
+        # set aspect ratio
+        ax.set_box_aspect([1, 1, 3/5])
+
+    # add spheres to the ax to show obstacles
+    if obstacles is not None:
+        for obstacle in obstacles:
+            ax.scatter(obstacle[0], obstacle[1], obstacle[2], s=100*obstacle[3], c='r')
 
 
 def two_skeleton_render(
@@ -329,7 +338,7 @@ def skeleton_render(
 
         for _ in range(4)
     ]
-    axrange = 5
+    axrange = 10
 
     # add text, colors, constraint
     text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
@@ -365,6 +374,75 @@ def skeleton_render(
     anim.save(gifname, writer='ffmpeg', fps=20)
     plt.close()
 
+
+def skeleton_render_wObstacle(
+        poses,
+        out="renders",
+        obstacles=None,
+        contact=None,
+        colors=None,
+        constraint=None,
+):
+    # generate the pose with FK
+    Path(out).mkdir(parents=True, exist_ok=True)
+    num_steps = poses.shape[0]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d", computed_zorder=False)  # computed_zorder kwarg requires matplotlib >= 3.5.0
+
+    point = np.array([0, 0, 1])
+    normal = np.array([0, 0, 1])
+    d = -point.dot(normal)
+    xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
+    z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
+    # plot the plane
+    ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
+    # Create lines initially without data
+    lines = [
+        ax.plot([], [], [], zorder=10, linewidth=1.5)[0]
+        for _ in smpl_parents
+    ]
+    scat = [
+        # ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
+        ax.scatter([], [], [], zorder=10, s=10)
+
+        for _ in range(4)
+    ]
+    axrange = 5
+
+    # add text, colors, constraint
+    text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
+    colors = colors if isinstance(colors, dict) else {}
+    if constraint is not None and hasattr(constraint, "plot"):
+        constraint.plot(fig, ax)
+
+    # create contact labels
+    if contact is None:
+        # the current heuristic says that the feet are in contact
+        feet = poses[:, (7, 8, 10, 11)]
+        feetv = np.zeros(feet.shape[:2])
+        feetv[:-1] = np.linalg.norm(feet[1:] - feet[:-1], axis=-1)
+        HEURISTIC = 0.02  # in original code, was 0.01
+        contact = feetv < HEURISTIC
+    else:
+        contact = contact > 0.95
+    # Creating the Animation object
+    anim = animation.FuncAnimation(
+        fig,
+        plot_single_pose,
+        num_steps,
+        fargs=(poses, lines, ax, axrange, scat, contact, text, colors, obstacles),
+        interval=1000 // 20,
+    )
+
+    # actually save the gif
+    path = os.path.normpath(out)
+    pathparts = path.split(os.sep)
+    # previously, this was done with writer = animation.HTMLWriter(fps=20), and with .motion.html
+    # ffmpeg may require updates; to do so, run `conda update ffmpeg` in command line
+    gifname = os.path.join(out, f"{pathparts[-1]}" + ".mp4")
+    anim.save(gifname, writer='ffmpeg', fps=20)
+    plt.close()
 
 class SMPLSkeleton:
     def __init__(
@@ -483,6 +561,52 @@ def just_render_simple(
         inner(xx)
         
     # p_map(inner, enumerate(poses))
+
+
+def just_render_simple_wObstacles(
+        smpl: SMPLSkeleton,
+        model_output,
+        normalizer,
+        render_out,
+        obstacles=None,
+        colors=None,
+        constraint=None):
+    samples = model_output
+    samples = normalizer.unnormalize(samples)
+    if obstacles is None:
+        raise ValueError("Obstacles must be set")
+    if samples.shape[2] != 135:
+        sample_contact, samples = torch.split(
+            samples, (4, samples.shape[2] - 4), dim=2
+        )
+        sample_contact = sample_contact.detach().cpu()
+    else:
+        sample_contact = None
+
+    # do the FK all at once
+    b, s, c = samples.shape
+    pos = samples[:, :, :3].to('cuda')  # np.zeros((sample.shape[0], 3))
+    q = samples[:, :, 3:].reshape(b, s, 22, 6)
+    # go 6d to ax
+    q = ax_from_6v(q).to('cuda')
+
+    poses = smpl.forward(q, pos).detach().cpu().numpy()
+
+    def inner(xx):
+        num, pose = xx
+
+        contact = sample_contact[num] if sample_contact is not None else None
+        skeleton_render_wObstacle(
+            pose,
+            out=render_out + '/' + str(num),
+            obstacles=obstacles,
+            contact=contact,
+            colors=colors,
+            constraint=constraint
+        )
+
+    for xx in enumerate(poses):
+        inner(xx)
 
 
 def render_to_compare(
