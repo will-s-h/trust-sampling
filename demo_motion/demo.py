@@ -14,6 +14,7 @@ from constraints.specified_points import SpecifiedPointConstraint
 from constraints.end_effector import EndEffectorConstraint
 from constraints.kinetic_energy import KineticEnergyConstraint
 from constraints.combine import Combine
+from constraints.nothing import NoConstraint
 from evaluator import get_all_metrics
 
 X_START, Y_START = -0.107, -0.1545
@@ -46,10 +47,6 @@ def main(opt):
             const.set_normalizer(model.normalizer)
             const.set_smpl(model.smpl)
     
-    motion_dir = os.path.join(opt.motion_save_dir, f"{opt.model_name}_{opt.constraint}/{opt.method}")
-    if not os.path.isdir(motion_dir): os.makedirs(motion_dir)
-    samples_file = os.path.join(motion_dir, "normal_samples.pt")
-    
     NUM = 1
     NUM_TIMESTEPS = 50
     print(f'Generating {NUM} normal sample{"" if NUM == 1 else "s"}...')
@@ -72,8 +69,11 @@ def main(opt):
         model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"], norm_upper_bound=extra_args["norm_upper_bound"], iterations_max=extra_args["iterations_max"], gradient_norm=extra_args["gradient_norm"])
         samples, traj_found = model.diffusion.trust_sample(shape, constraint_obj=opt.constraint, sample_steps=NUM_TIMESTEPS, debug=True)
         
-    print(f'Finished generating trust samples.')
+    print(f'Finished generating {opt.method} samples.')
+    motion_dir = os.path.join(opt.motion_save_dir, f"{opt.model_name}_{opt.constraint}/{opt.method}")
     if opt.save_motions: 
+        if not os.path.isdir(motion_dir): os.makedirs(motion_dir)
+        samples_file = os.path.join(motion_dir, "normal_samples.pt")
         torch.save(samples, samples_file)
         print(f'Saved in {motion_dir}')
     
@@ -96,7 +96,7 @@ def main(opt):
 if __name__ == "__main__":
     opt = parse_test_opt()
     opt.motion_save_dir = "./motions"
-    opt.render_dir = "renders/experimental"
+    opt.render_dir = "renders/new"
     opt.save_motions = False
     opt.no_render = False
     opt.predict_contact = True
@@ -108,44 +108,40 @@ if __name__ == "__main__":
     # traj = torch.stack((x_traj, y_traj)).T
     # const = TrajectoryConstraint(traj=traj)
     # const.set_name("Lshape")
-    # opt.constraint = const
     
     # points = [(0, 4, X_START), (30, 4, X_START), (59, 4, X_START),
     #           (0, 5, Y_START), (30, 5, 0.3), (59, 5, Y_START)]
     # const = SpecifiedPointConstraint(points=points)
     # const.set_name("specified_up_and_back")
-    # opt.constraint = const
 
     # points = [(25, 6, 0.3), (30, 6, 0.8), (35, 6, 0.3)]
     # const = SpecifiedPointConstraint(points=points)
     # const.set_name("specified_jump")
-    # opt.constraint = const
     
     # points = [(0, "lwrist", 0.0, 0.0, 1.5), (30, "lwrist", 0.0, 1.0, 1.5), (59, "lwrist", 1.0, 1.0, 1.5)]
     # const = EndEffectorConstraint(points=points)
     # const.set_name("lwrist_ablation")
-    # opt.constraint = const
     
     # points = [(0, "rankle", 0.0, 0.0, 0.0), (30, "rankle", 0.0, 1.0, 1.5)]
     # const = EndEffectorConstraint(points=points)
     # const.set_name("rankle")
-    # opt.constraint = const
     
     # const = KineticEnergyConstraint(KE=30)
     # const.set_name("KE=30")
-    # opt.constraint = const
     
-    const = Combine(
-        EndEffectorConstraint(points=[
-            (29, "head", 0.0, 1.0, 0.5),
-            (30, "head", 0.0, 1.0, 0.5),
-            (31, "head", 0.0, 1.0, 0.5)
-        ]),
-        KineticEnergyConstraint(KE=10)
-    )
-    const.set_name("cartwheel_please")
+    # const = Combine(
+    #     EndEffectorConstraint(points=[
+    #         (29, "head", 0.0, 1.0, 0.5),
+    #         (30, "head", 0.0, 1.0, 0.5),
+    #         (31, "head", 0.0, 1.0, 0.5)
+    #     ]),
+    #     KineticEnergyConstraint(KE=10)
+    # )
+    # const.set_name("cartwheel_please")
+    
+    const = NoConstraint()
+    
     opt.constraint = const
-    
-    for method in ["dps", "dsg", "trust"][0:2]:
+    for method in ["dps", "dsg", "trust"][2:]:
         opt.method = method
         main(opt)
