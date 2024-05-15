@@ -3,3 +3,4 @@ dataset/ffhq*
 dataset/imagenet*
 renders/*
 motions/*
+demo_image/experiments/*

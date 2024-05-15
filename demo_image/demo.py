@@ -72,7 +72,7 @@ def main(args):
         # elif args.constraint == "face_sketch":
         #     const = FaceSketchConstraint(paths)
             
-        SAMPLE_STEPS = 200
+        SAMPLE_STEPS = 50
         NUM_SAMPLES = len(paths)
         SHAPE = (NUM_SAMPLES, 3, 256, 256)
         diffusion : GaussianDiffusion = GaussianDiffusion(model, schedule="linear", n_timestep=1000, predict_epsilon=True, clip_denoised=True, learned_variance=True).to('cuda')
@@ -105,16 +105,16 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", type=str, default="trust")
-    # parser.add_argument("--model", type=str, default="ffhq")
-    # parser.add_argument("--constraint", type=str, default="inpaint")
-    # parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")
-    # parser.add_argument("--dataset_name", type=str, default="ffhq")
-    parser.add_argument("--model", type=str, default="imagenet")
+    parser.add_argument("--model", type=str, default="ffhq")
     parser.add_argument("--constraint", type=str, default="inpaint")
-    parser.add_argument("--dataset_path", type=str, default="../dataset/imagenet-100")
-    parser.add_argument("--dataset_name", type=str, default="imagenet")
-    parser.add_argument("--norm_upper_bound", type=float, default=450)
-    parser.add_argument("--iterations_max", type=int, default=5)
+    parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")
+    parser.add_argument("--dataset_name", type=str, default="ffhq")
+    # parser.add_argument("--model", type=str, default="imagenet")
+    # parser.add_argument("--constraint", type=str, default="inpaint")
+    # parser.add_argument("--dataset_path", type=str, default="../dataset/imagenet-100")
+    # parser.add_argument("--dataset_name", type=str, default="imagenet")
+    parser.add_argument("--norm_upper_bound", type=float, default=480)
+    parser.add_argument("--iterations_max", type=int, default=7)
     parser.add_argument("--gradient_norm", type=float, default=3)
     args = parser.parse_args()
     main(args)

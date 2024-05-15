@@ -202,7 +202,7 @@ class GaussianDiffusion(nn.Module):
 
     @torch.no_grad()  # note that weight ranges from 0.3 to 1 in DPS paper
     def dps_sample(self, shape, sample_steps=50, constraint_obj=None, weight=1, save_intermediates=False, **kwargs):
-        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 0.0
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
@@ -248,7 +248,7 @@ class GaussianDiffusion(nn.Module):
     
     @torch.no_grad()  # in paper, gr=0.1 or 0.2
     def dsg_sample(self, shape, sample_steps=50, constraint_obj=None, gr=0.1, save_intermediates=False, **kwargs):
-        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 0.0
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
@@ -303,7 +303,7 @@ class GaussianDiffusion(nn.Module):
     
     @torch.no_grad()
     def trust_sample(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False, **kwargs):
-        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 0.0
         assert constraint_obj is not None, "must pass in constraint object!"
         assert (not save_intermediates or not debug), "cannot both save intermediates and be in debug mode. must pick one of the two!"
 
@@ -345,6 +345,8 @@ class GaussianDiffusion(nn.Module):
                 c = (1 - alpha_next - sigma ** 2).sqrt()
                 noise = torch.randn_like(x)
                 model_mean = x_start * alpha_next.sqrt() + c * pred_noise
+
+                init_model_mean = model_mean.clone()
                 
                 #### KEY PORTION: TRUST SAMPLING ####
                 model_func = lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
@@ -353,7 +355,7 @@ class GaussianDiffusion(nn.Module):
                     new_pred_noise, pred_xstart, *_ = model_func(model_mean)
                 pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                 init_norm = torch.min(pred_noise_norms).item()
-                # print(f'norm: {init_norm}')
+                # print(f'init norm: {init_norm}')
 
                 # pred_noise_norms = torch.zeros(1).to(pred_noise_norms)   # force to at least to one step
 
@@ -363,7 +365,7 @@ class GaussianDiffusion(nn.Module):
                 prev_loss = torch.tensor(100000.0)
                 # g = None
 
-                while j < self.iterations_max and torch.min(pred_noise_norms).item() <= init_norm + 0.2:
+                while j < self.iterations_max and torch.min(pred_noise_norms).item() <= (init_norm + 1.0 - alpha):
                     # calculate gradients
                     with torch.enable_grad():
                         loss = constraint_obj.constraint(pred_xstart)
@@ -385,6 +387,7 @@ class GaussianDiffusion(nn.Module):
                     # g *= (pred_noise_norms <= self.norm_upper_bound).int().view((-1,) + ones)
 
                     # update model_mean
+                    # init_model_mean = model_mean.clone()
                     model_mean = model_mean + g
                     # if debug: traj.append((self._get_trajectory(model_mean), time, 'gradient step'))
                     
@@ -397,9 +400,9 @@ class GaussianDiffusion(nn.Module):
                     pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                     # print(f'norm: {torch.min(pred_noise_norms).item()}')
 
-                # if torch.min(pred_noise_norms).item() > init_norm + 0.2 and g is not None:
-                #     # back up to the previous step
-                #     model_mean = model_mean - g
+                if torch.min(pred_noise_norms).item() > (init_norm + 1.0):
+                    # back up to the previous step
+                    model_mean = init_model_mean
                     
                 #####################################
                 neural_function_evals += min(j+1, self.iterations_max)
