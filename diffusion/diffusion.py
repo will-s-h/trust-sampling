@@ -1,11 +1,13 @@
 import copy
 from functools import partial
+
 import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
 from .utils import extract, make_beta_schedule
+
 
 def identity(t, *args, **kwargs):
     return t
@@ -301,7 +303,7 @@ class GaussianDiffusion(nn.Module):
     
     @torch.no_grad()
     def trust_sample(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False, **kwargs):
-        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 0.1
         assert constraint_obj is not None, "must pass in constraint object!"
         assert (not save_intermediates or not debug), "cannot both save intermediates and be in debug mode. must pick one of the two!"
 
@@ -318,6 +320,9 @@ class GaussianDiffusion(nn.Module):
         # if debug: traj.append((self._get_trajectory(x), 1001, 'starting trajectory'))
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+
+            if time_next < 160:
+                self.iterations_max = 1
             
             # if time-travel technique is necessary; typically not needed
             iterations = self.iteration_func(time_next)
@@ -350,6 +355,7 @@ class GaussianDiffusion(nn.Module):
                 with torch.enable_grad():
                     new_pred_noise, pred_xstart, *_ = model_func(model_mean)
                 pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
+                pred_noise_norms = torch.zeros(1).to(pred_noise_norms)   # force to at least to one step
                 j = 0
                 
                 # while any sample is within trust region

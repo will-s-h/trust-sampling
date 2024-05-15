@@ -1,1 +1,5 @@
 */**/__pycache__/
+dataset/ffhq*
+dataset/imagenet*
+renders/*
+motions/*

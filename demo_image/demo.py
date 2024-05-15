@@ -1,21 +1,25 @@
 ## to be able to import all modules
-from pathlib import Path
 import sys
+from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.parent))
 
 import argparse
 import os
-import torch
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 import yaml
-from PIL import Image
-from model.unet import create_model
-from diffusion.diffusion import GaussianDiffusion
-from constraints.SuperResolution import SuperResolutionConstraint
-from constraints.Inpaint import InpaintConstraint
 from constraints.GaussianDeblur import GaussianBlurConstraint
-from constraints.Sketch import FaceSketchConstraint
+from constraints.Inpaint import InpaintConstraint
+
+# from constraints.Sketch import FaceSketchConstraint
+from constraints.SuperResolution import SuperResolutionConstraint
+
+from diffusion.diffusion import GaussianDiffusion
+from model.unet import create_model
+
 
 def load_yaml(file_path: str) -> dict:
     with open(file_path) as f:
@@ -65,13 +69,13 @@ def main(args):
             const = InpaintConstraint(paths, mask=mask)
         elif args.constraint == "gaussian_deblur":
             const = GaussianBlurConstraint(paths, 61, 3.0)
-        elif args.constraint == "face_sketch":
-            const = FaceSketchConstraint(paths)
+        # elif args.constraint == "face_sketch":
+        #     const = FaceSketchConstraint(paths)
             
         SAMPLE_STEPS = 200
         NUM_SAMPLES = len(paths)
         SHAPE = (NUM_SAMPLES, 3, 256, 256)
-        diffusion = GaussianDiffusion(model, schedule="linear", n_timestep=1000, predict_epsilon=True, clip_denoised=True, learned_variance=True).to('cuda')
+        diffusion : GaussianDiffusion = GaussianDiffusion(model, schedule="linear", n_timestep=1000, predict_epsilon=True, clip_denoised=True, learned_variance=True).to('cuda')
         extra_args = {}
         
         if args.method == "dps":
@@ -102,11 +106,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", type=str, default="trust")
     parser.add_argument("--model", type=str, default="ffhq")
-    parser.add_argument("--constraint", type=str, default="super_resolution")
+    parser.add_argument("--constraint", type=str, default="inpaint")
     parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")
     parser.add_argument("--dataset_name", type=str, default="ffhq")
-    parser.add_argument("--norm_upper_bound", type=float, default=442)
-    parser.add_argument("--iterations_max", type=int, default=4)
-    parser.add_argument("--gradient_norm", type=float, default=1)
+    parser.add_argument("--norm_upper_bound", type=float, default=440)
+    parser.add_argument("--iterations_max", type=int, default=5)
+    parser.add_argument("--gradient_norm", type=float, default=3)
     args = parser.parse_args()
     main(args)
