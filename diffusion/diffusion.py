@@ -319,11 +319,8 @@ class GaussianDiffusion(nn.Module):
         if save_intermediates: intermediates.append(x)
         # if debug: traj.append((self._get_trajectory(x), 1001, 'starting trajectory'))
 
-        outer_init_norm = None
-
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
 
-            
             # if time-travel technique is necessary; typically not needed
             iterations = self.iteration_func(time_next)
             for _ in range(iterations):
@@ -356,15 +353,15 @@ class GaussianDiffusion(nn.Module):
                     new_pred_noise, pred_xstart, *_ = model_func(model_mean)
                 pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                 init_norm = torch.min(pred_noise_norms).item()
-                if outer_init_norm is None: outer_init_norm = init_norm
-                print(f'norm: {init_norm}')
+                # print(f'norm: {init_norm}')
 
                 # pred_noise_norms = torch.zeros(1).to(pred_noise_norms)   # force to at least to one step
+
                 j = 0
                 
                 # while any sample is within trust region
                 prev_loss = torch.tensor(100000.0)
-                g = None
+                # g = None
 
                 while j < self.iterations_max and torch.min(pred_noise_norms).item() <= init_norm + 0.2:
                     # calculate gradients
@@ -375,7 +372,7 @@ class GaussianDiffusion(nn.Module):
                         prev_loss = loss
                         g = -torch.autograd.grad(loss, model_mean)[0]
 
-                    print(f'loss: {loss.item()}   ')
+                    # print(f'loss: {loss.item()}   ')
 
                     # calculate norms to divide g by, for each sample
                     norms = (torch.norm(g.view(g.shape[0], -1), dim=1)).view((g.shape[0],) + ones).expand(g.shape) + 1e-6  # avoid div by 0
@@ -383,9 +380,9 @@ class GaussianDiffusion(nn.Module):
                     # normalize g
                     g *= self.gradient_norm / norms
                     
-                    # zero out the gradient of samples that are outside of the trust region
-                    # TODO: yifeng check this
-                    g *= (pred_noise_norms <= self.norm_upper_bound).int().view((-1,) + ones)
+                    # # zero out the gradient of samples that are outside of the trust region
+                    # # TODO: yifeng check this
+                    # g *= (pred_noise_norms <= self.norm_upper_bound).int().view((-1,) + ones)
 
                     # update model_mean
                     model_mean = model_mean + g
@@ -398,7 +395,7 @@ class GaussianDiffusion(nn.Module):
                     with torch.enable_grad():
                         new_pred_noise, pred_xstart, *_ = model_func(model_mean)
                     pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
-                    print(f'norm: {torch.min(pred_noise_norms).item()}')
+                    # print(f'norm: {torch.min(pred_noise_norms).item()}')
 
                 # if torch.min(pred_noise_norms).item() > init_norm + 0.2 and g is not None:
                 #     # back up to the previous step
