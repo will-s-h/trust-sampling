@@ -303,6 +303,9 @@ class GaussianDiffusion(nn.Module):
     
     @torch.no_grad()
     def trust_sample(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False, **kwargs):
+
+        delta_norm_threshold = 1.0
+
         batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 0.0
         assert constraint_obj is not None, "must pass in constraint object!"
         assert (not save_intermediates or not debug), "cannot both save intermediates and be in debug mode. must pick one of the two!"
@@ -365,7 +368,7 @@ class GaussianDiffusion(nn.Module):
                 prev_loss = torch.tensor(100000.0)
                 # g = None
 
-                while j < self.iterations_max and torch.min(pred_noise_norms).item() <= (init_norm + 1.0 - alpha):
+                while j < self.iterations_max and torch.min(pred_noise_norms).item() <= (init_norm + delta_norm_threshold - alpha):
                     # calculate gradients
                     with torch.enable_grad():
                         loss = constraint_obj.constraint(pred_xstart)
@@ -400,7 +403,7 @@ class GaussianDiffusion(nn.Module):
                     pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                     # print(f'norm: {torch.min(pred_noise_norms).item()}')
 
-                if torch.min(pred_noise_norms).item() > (init_norm + 1.0):
+                if torch.min(pred_noise_norms).item() > (init_norm + delta_norm_threshold):
                     # back up to the previous step
                     model_mean = init_model_mean
                     
