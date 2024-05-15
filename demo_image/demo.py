@@ -109,7 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--constraint", type=str, default="inpaint")
     parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")
     parser.add_argument("--dataset_name", type=str, default="ffhq")
-    parser.add_argument("--norm_upper_bound", type=float, default=440)
+    parser.add_argument("--norm_upper_bound", type=float, default=445)
     parser.add_argument("--iterations_max", type=int, default=5)
     parser.add_argument("--gradient_norm", type=float, default=3)
     args = parser.parse_args()
