@@ -2,8 +2,8 @@ import torch
 import numpy as np
 from dataset.quaternion import ax_from_6v
 
-class ObstacleAvoidance:
-    def __init__(self, obstacles, target, number_of_windows = 2,  number_of_overlapping_frames = 2,contact=True, device='cuda'):
+class AngularMomentumConstraint:
+    def __init__(self, angular_momentum, target, number_of_windows = 2,  number_of_overlapping_frames = 2,contact=True, device='cuda'):
         self.number_of_windows = number_of_windows
         self.number_of_overlapping_frames = number_of_overlapping_frames
         self.device = device
@@ -15,9 +15,7 @@ class ObstacleAvoidance:
         self.x_target = target[0].to(device)
         self.y_target = target[1].to(device)
 
-        self.z_target = 0.85
-
-        self.obstacles = obstacles
+        self.angular_momentum = torch.tensor(angular_momentum).to(device)
 
 
     def set_name(self, name):
@@ -83,23 +81,32 @@ class ObstacleAvoidance:
         y_start = unnorm_samples[:, 0, 5]
         x_end = unnorm_samples[:, -1, 4]
         y_end = unnorm_samples[:, -1, 5]
-        z_start = unnorm_samples[:, 0, 6]
-        z_end = unnorm_samples[:, -1, 6]
         begin_end_loss = (torch.square(x_start) + torch.square(y_start) + torch.square(
-            x_end - self.x_target) + torch.square(y_end - self.y_target) + torch.square(
-            z_start - self.z_target) + torch.square(z_end - self.z_target))*0.25
+            x_end - self.x_target) + torch.square(y_end - self.y_target))*0.25
 
-        # Obstacle loss
-        poses = self.samples_to_poses(stacked_samples) # (1, T, 24, 3)
-        obstacle_violations = []
-        for obstacle in self.obstacles:
-            squared_distance_obstacle_center = torch.square(poses[...,0] - obstacle[0]) + torch.square(poses[...,1] - obstacle[1]) + torch.square(poses[...,2] - obstacle[2])
-            obstacle_violation = torch.relu(obstacle[3] - torch.sqrt(squared_distance_obstacle_center))
-            obstacle_violations.append(obstacle_violation)
-        obstacle_loss = torch.max(torch.stack(obstacle_violations))
+        # Angular momentum loss
+        poses = self.samples_to_poses(stacked_samples)
+        poses_xzplane = torch.stack((poses[...,[10,11,22,23], 0], poses[...,[10,11,22,23], 2]), dim=3)
+        root_relative_poses_xzplane = poses_xzplane - poses_xzplane[..., 0:1, :]
+
+        joint_velocities = poses[:, 1:, ...] - poses[:, :-1, ...]
+        joint_velocities_xzplane = torch.stack((joint_velocities[...,[10,11,22,23], 0], joint_velocities[...,[10,11,22,23], 2]), dim=3)
+        root_relative_joint_velocities_xzplane = joint_velocities_xzplane - joint_velocities_xzplane[..., 0:1, :]
+
+        cross_input_1 = root_relative_joint_velocities_xzplane
+        cross_input_2 = root_relative_poses_xzplane[:, :-1, ...]
+
+        # pad last dimension that is 3 dimensional
+        cross_input_1 = torch.cat((cross_input_1, torch.zeros(cross_input_1.shape[:-1] + (1,), device=self.device)), dim=-1)
+        cross_input_2 = torch.cat((cross_input_2, torch.zeros(cross_input_2.shape[:-1] + (1,), device=self.device)), dim=-1)
+        angular_momentum = torch.sum(torch.cross(cross_input_1, cross_input_2, dim=-1)[...,-1], dim=2)
+        angular_momentum = angular_momentum[:, 60:90]
+        angular_momentum_violations = torch.relu(self.angular_momentum - angular_momentum)
+
+        angular_momentum_loss = torch.mean(torch.square(angular_momentum_violations))
 
 
-        return (continuity_loss, begin_end_loss, obstacle_loss)
+        return (continuity_loss, begin_end_loss, angular_momentum_loss)
 
     def gradient(self, samples, func=None):
         with torch.enable_grad():
@@ -107,9 +114,9 @@ class ObstacleAvoidance:
             clean_samples = func(samples)[1]
             constraint_losses = self.constraint(clean_samples)
 
-            loss = constraint_losses[0] + 0.05*constraint_losses[1] + 0.1*constraint_losses[2]
+            loss = constraint_losses[0] + 0*0.05*constraint_losses[1] + constraint_losses[2]
 
-            grad = -torch.autograd.grad(torch.mean(loss) , samples)[0]
+            grad = -torch.autograd.grad(loss , samples)[0]
             return grad
 
 
