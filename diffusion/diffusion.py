@@ -353,7 +353,8 @@ class GaussianDiffusion(nn.Module):
                 j = 0
                 
                 # while any sample is within trust region
-                while j < self.iterations_max and torch.min(pred_noise_norms).item() <= self.norm_upper_bound:
+                iterations_max = self.iterations_max if isinstance(self.iterations_max, int) else self.iterations_max(time)
+                while j < iterations_max and torch.min(pred_noise_norms).item() <= self.norm_upper_bound:
                     # calculate gradients
                     with torch.enable_grad():
                         loss = constraint_obj.constraint(pred_xstart)
@@ -363,7 +364,9 @@ class GaussianDiffusion(nn.Module):
                     norms = (torch.norm(g.view(g.shape[0], -1), dim=1)).view((g.shape[0],) + ones).expand(g.shape) + 1e-6  # avoid div by 0
                     
                     # normalize g
-                    g *= self.gradient_norm / norms
+                    gradient_norm = self.gradient_norm if (isinstance(self.gradient_norm, float) or isinstance(self.gradient_norm, int)) else \
+                                    self.gradient_norm(time)
+                    g *= gradient_norm / norms
                     
                     # zero out the gradient of samples that are outside of the trust region
                     g *= (pred_noise_norms <= self.norm_upper_bound).int().view((-1,) + ones)
@@ -374,14 +377,14 @@ class GaussianDiffusion(nn.Module):
                     
                     # calculate whether or not to take another step
                     j += 1
-                    if j >= self.iterations_max: break
+                    if j >= iterations_max: break
                     model_mean.requires_grad_()
                     with torch.enable_grad():
                         new_pred_noise, pred_xstart, *_ = model_func(model_mean)
                     pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                     
                 #####################################
-                neural_function_evals += min(j+1, self.iterations_max)
+                neural_function_evals += min(j+1, iterations_max)
                 x = model_mean + sigma * noise
                 # if debug: traj.append((self._get_trajectory(x), time, 'noise'))
                 

@@ -16,6 +16,7 @@ from constraints.SuperResolution import SuperResolutionConstraint
 from constraints.Inpaint import InpaintConstraint
 from constraints.GaussianDeblur import GaussianBlurConstraint
 from constraints.Sketch import FaceSketchConstraint
+from iteration_schedule import *
 
 def load_yaml(file_path: str) -> dict:
     with open(file_path) as f:
@@ -55,6 +56,16 @@ def main(args):
     
     avg_nfes = 0
     
+    if args.iterations_max == 'InverseScheduler':
+        args.iterations_max = InverseScheduler(ddim_steps=200, nfes=1000)
+    elif args.iterations_max == 'LinearScheduler':
+        args.iterations_max = LinearScheduler(1, 8, 1000)
+    
+    if args.gradient_norm == 'InverseNormScheduler':
+        args.gradient_norm = InverseNormScheduler(args.iterations_max)
+    else:
+        args.gradient_norm = int(args.gradient_norm)
+    
     for j in range(len(all_paths) // batch_size):
         paths = all_paths[j * batch_size : (j+1) * batch_size]
         
@@ -90,7 +101,7 @@ def main(args):
             avg_nfes += nfes / (len(all_paths) // batch_size)
 
         # plot all experiments
-        save_dir = f"experiments/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
+        save_dir = f"schedules/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
         if not os.path.exists(save_dir): os.makedirs(save_dir)
 
         for i, sample in enumerate(samples):
@@ -102,11 +113,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", type=str, default="trust")
     parser.add_argument("--model", type=str, default="ffhq")
-    parser.add_argument("--constraint", type=str, default="super_resolution")
+    parser.add_argument("--constraint", type=str, default="inpaint")
     parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")
     parser.add_argument("--dataset_name", type=str, default="ffhq")
-    parser.add_argument("--norm_upper_bound", type=float, default=442)
-    parser.add_argument("--iterations_max", type=int, default=4)
-    parser.add_argument("--gradient_norm", type=float, default=1)
+    parser.add_argument("--norm_upper_bound", type=float, default=999)
+    parser.add_argument("--iterations_max", default=4)
+    parser.add_argument("--gradient_norm", default=1)
     args = parser.parse_args()
     main(args)
