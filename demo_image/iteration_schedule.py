@@ -15,14 +15,15 @@ class LinearScheduler:
         return f"LinearSchedule_{self.start}to{self.end}"
 
 class InverseNormScheduler:
-    def __init__(self, J_scheduler):
+    def __init__(self, J_scheduler, base_norm=1):
+        self.base_norm = base_norm
         self.J_scheduler = J_scheduler
 
     def __call__(self, time):
-        return 1 / (self.J_scheduler.maxes[time] ** 0.5)
+        return self.base_norm / (self.J_scheduler.maxes[time] ** 0.5)
 
     def __str__(self):
-        return "InverseNormScheduler"
+        return f"InverseNormScheduler{self.base_norm}"
 
 class InverseScheduler:
     def __init__(self, betas=None, total_steps=1000, ddim_steps=200, nfes=1000):
