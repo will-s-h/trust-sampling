@@ -92,6 +92,10 @@ class CrawlConstraint:
 
 
         return (continuity_loss, begin_end_loss, obstacle_loss)
+    
+    def constraint_oneloss(self, samples):
+        continuity_loss, begin_end_loss, obstacle_loss = self.constraint(samples)
+        return continuity_loss + 0.05*begin_end_loss + obstacle_loss
 
     def gradient(self, samples, func=None):
         with torch.enable_grad():

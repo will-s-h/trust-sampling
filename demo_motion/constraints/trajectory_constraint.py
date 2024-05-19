@@ -46,6 +46,13 @@ class TrajectoryConstraint:
         if samples.dim() == 2:
             return torch.sum((samples[..., self.root_slice] - self.traj) ** 2)
         return torch.mean(torch.mean((samples[..., self.root_slice] - self.traj.repeat(samples.shape[0], 1, 1)) ** 2, dim=-1 ), dim=-1)
+    
+    def constraint_oneloss(self, samples):
+        traj = self.traj.repeat(samples.shape[0], 1, 1)
+        traj.requires_grad_(True)
+        loss = -torch.nn.functional.mse_loss(samples[..., self.root_slice], traj)
+        loss_per_batch = -torch.mean(torch.mean(torch.square(samples[..., self.root_slice]- traj), dim=-1),dim=-1) # have a loss for each sample in the batch
+        return loss * (loss_per_batch.unsqueeze(-1).unsqueeze(-1) / loss).detach()
         
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)

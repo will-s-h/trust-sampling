@@ -107,6 +107,10 @@ class AngularMomentumConstraint:
 
 
         return (continuity_loss, begin_end_loss, angular_momentum_loss)
+    
+    def constraint_oneloss(self, samples):
+        continuity_loss, begin_end_loss, angular_momentum_loss = self.constraint(samples)
+        return continuity_loss + angular_momentum_loss
 
     def gradient(self, samples, func=None):
         with torch.enable_grad():

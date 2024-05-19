@@ -87,7 +87,11 @@ class HighJumpConstraint:
         violation = torch.where(violation < 0, torch.zeros_like(violation), violation)
         return violation
 
-
+    def constraint_oneloss(self, samples):
+        continuity_loss, begin_end_loss, high_hand_loss = self.constraint(samples)
+        loss = continuity_loss + begin_end_loss + high_hand_loss
+        return torch.mean(loss) * (loss.unsqueeze(-1).unsqueeze(-1) / torch.mean(loss)).detach()
+        
     def gradient(self, samples, func=None):
         with torch.enable_grad():
             samples.requires_grad_(True)

@@ -31,6 +31,13 @@ class TrajectoryConstraint3D:
         loss = torch.sqrt(torch.mean(torch.mean(torch.square(samples[..., self.root_slice] - self.traj), dim=-1),
                     dim=-1))
         return loss
+    
+    def constraint_oneloss(self, samples):
+        traj = self.traj
+        traj.requires_grad_(True)
+        loss = torch.nn.functional.mse_loss(samples[..., self.root_slice], traj)
+        loss_per_batch = torch.mean(torch.mean(torch.square(samples[..., self.root_slice] - traj), dim=-1), dim=-1)
+        return loss * (loss_per_batch.unsuqeeze(-1).unsqueeze(-1) / loss).detach()
 
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)

@@ -394,7 +394,7 @@ class GaussianDiffusion(nn.Module):
                 while j < iterations_max and torch.min(pred_noise_norms).item() <= self.norm_upper_bound:
                     # calculate gradients
                     with torch.enable_grad():
-                        loss = constraint_obj.constraint(pred_xstart)
+                        loss = constraint_obj.constraint_oneloss(pred_xstart) if hasattr(constraint_obj, 'constraint_oneloss') else constraint_obj.constraint(pred_xstart)
                         g = -torch.autograd.grad(loss, model_mean)[0]
                     
                     # calculate norms to divide g by, for each sample

@@ -53,6 +53,10 @@ class LongFormMotion:
 
         loss = -torch.nn.functional.mse_loss(start_slices, end_slices)
         return loss, loss_additional_constraint_3
+    
+    def constraint_oneloss(self, samples):
+        loss, loss_additional_constraint_3 = self.constraint(samples)
+        return loss + 0.01 * loss_additional_constraint_3
 
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
