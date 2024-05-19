@@ -92,6 +92,11 @@ class EndEffectorConstraintFootHand:
         loss = torch.mean(torch.mean(torch.mean(torch.square(generated - self.targets), dim=-1),
                                      dim=-1), dim=-1)
         return loss
+    
+    def constraint_oneloss(self, samples):
+        loss_per_batch = self.constraint(samples)
+        loss = torch.mean(loss_per_batch)
+        return loss * (loss_per_batch.unsqueeze(-1).unsqueeze(-1) / loss).detach()
 
     def constraint_metric(self, samples):
         loss = torch.zeros((samples.shape[0],), device=self.device)
