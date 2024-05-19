@@ -1,4 +1,6 @@
 
+# run with python -m demo_motion.calculate_fid
+
 import os
 
 import numpy as np
