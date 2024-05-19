@@ -13,6 +13,8 @@ from constraints.trajectory_constraint import TrajectoryConstraint
 from constraints.specified_points import SpecifiedPointConstraint
 from constraints.end_effector import EndEffectorConstraint
 from constraints.kinetic_energy import KineticEnergyConstraint
+from constraints.combine import Combine
+from constraints.nothing import NoConstraint
 from evaluator import get_all_metrics
 
 X_START, Y_START = -0.107, -0.1545
@@ -53,9 +55,11 @@ def main(opt):
     #                              constraint=None)
 
     if opt.method == "dps":
-        extra_args["weight"] = 0.1
+        NUM_TIMESTEPS = 250
+        extra_args["weight"] = 0.3
         samples = model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, weight=extra_args["weight"])
     elif opt.method == "dsg":
+        NUM_TIMESTEPS = 250
         extra_args["gr"] = 0.1
         samples = model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, gr=extra_args["gr"])
     elif opt.method == "trust":
@@ -91,7 +95,7 @@ def main(opt):
 if __name__ == "__main__":
     opt = parse_test_opt()
     opt.motion_save_dir = "./motions"
-    opt.render_dir = "renders/experimental"
+    opt.render_dir = "renders/new"
     opt.save_motions = False
     opt.no_render = True
     opt.predict_contact = True
@@ -109,12 +113,10 @@ if __name__ == "__main__":
     #           (0, 5, Y_START), (30, 5, 0.3), (59, 5, Y_START)]
     # const = SpecifiedPointConstraint(points=points)
     # const.set_name("specified_up_and_back")
-    # opt.constraint = const
 
     # points = [(25, 6, 0.3), (30, 6, 0.8), (35, 6, 0.3)]
     # const = SpecifiedPointConstraint(points=points)
     # const.set_name("specified_jump")
-    # opt.constraint = const
     
     # points = [(0, "lwrist", 0.0, 0.0, 1.5), (30, "lwrist", 0.0, 1.0, 1.5), (59, "lwrist", 1.0, 1.0, 1.5)]
     # const = EndEffectorConstraint(points=points)
@@ -124,12 +126,23 @@ if __name__ == "__main__":
     # points = [(0, "rankle", 0.0, 0.0, 0.0), (30, "rankle", 0.0, 1.0, 1.5)]
     # const = EndEffectorConstraint(points=points)
     # const.set_name("rankle")
-    # opt.constraint = const
     
-    # const = KineticEnergyConstraint(KE=0)
-    # const.set_name("KE=0")
-    # opt.constraint = const
+    # const = KineticEnergyConstraint(KE=30)
+    # const.set_name("KE=30")
     
+    # const = Combine(
+    #     EndEffectorConstraint(points=[
+    #         (29, "head", 0.0, 1.0, 0.5),
+    #         (30, "head", 0.0, 1.0, 0.5),
+    #         (31, "head", 0.0, 1.0, 0.5)
+    #     ]),
+    #     KineticEnergyConstraint(KE=10)
+    # )
+    # const.set_name("cartwheel_please")
+    
+    const = NoConstraint()
+    
+    opt.constraint = const
     for method in ["dps", "dsg", "trust"][2:]:
         opt.method = method
         main(opt)

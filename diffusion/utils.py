@@ -70,7 +70,7 @@ def make_beta_schedule(
         beta_start = scale * linear_start
         beta_end = scale * linear_end
         
-        betas = torch.linspace(beta_start, beta_end, n_timestep, dtype=torch.float64)
+        betas = torch.from_numpy(np.linspace(beta_start, beta_end, n_timestep, dtype=np.float64))
         # betas = (
         #     torch.linspace(
         #         linear_start ** 0.5, linear_end ** 0.5, n_timestep, dtype=torch.float64

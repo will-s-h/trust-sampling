@@ -51,6 +51,14 @@ class SuperResolutionConstraint():
         loss = torch.norm(difference)
         return loss
     
+    # def gradient(self, x_start, x_t, func=None):
+    #     # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
+    #     assert func is not None
+    #     with torch.enable_grad():
+    #         next_sample = func(x_start)[1]
+    #         loss = -self.constraint(next_sample)
+    #         return torch.autograd.grad(loss, x_t)[0]
+    
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
         assert func is not None
