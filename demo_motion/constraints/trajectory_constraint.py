@@ -45,7 +45,7 @@ class TrajectoryConstraint:
     def constraint(self, samples):
         if samples.dim() == 2:
             return torch.sum((samples[..., self.root_slice] - self.traj) ** 2)
-        return torch.sum((samples[..., self.root_slice] - self.traj.repeat(samples.shape[0], 1, 1)) ** 2)
+        return torch.mean(torch.mean((samples[..., self.root_slice] - self.traj.repeat(samples.shape[0], 1, 1)) ** 2, dim=-1 ), dim=-1)
         
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
@@ -58,8 +58,15 @@ class TrajectoryConstraint:
             samples.requires_grad_(True)
             next_sample = func(samples)[1]
             loss = -torch.nn.functional.mse_loss(next_sample[..., self.root_slice], traj)
-            return (torch.autograd.grad(loss, samples)[0])
-    
+
+            loss_per_batch = -torch.mean(torch.mean(torch.square(next_sample[..., self.root_slice]- traj), dim=-1),dim=-1) # have a loss for each sample in the batch
+
+            return (torch.autograd.grad(loss, samples)[0] / loss * loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
+            # grad = []
+            # for j in range(loss.shape[0]):
+            #     grad.append(torch.autograd.grad(loss[j], samples, retain_graph=True)[0][j,...])
+            # return torch.stack(grad)
+
     def plot(self, fig, ax):
         # first, normalize traj
         assert self.normalizer is not None, "must have initialized a normalizer via set_normalizer()"
