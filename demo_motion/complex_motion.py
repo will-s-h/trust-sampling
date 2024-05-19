@@ -4,6 +4,7 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
 ## other imports
+import csv
 from motion_args import parse_test_opt
 from model.motion_wrapper import MotionWrapper
 import torch
@@ -22,18 +23,10 @@ from evaluator import get_all_metrics_
 from tqdm import tqdm
 
 
-def main_angular_momentum(opt):
-    batch_size = opt.batch_size
-    NUM_TIMESTEPS = opt.NUM_TIMESTEPS
-    shape = (1, 60, 139)
-
-    targets = torch.tensor([5, 0])
-    angular_momentum_constraint = AngularMomentumConstraint(0.8, targets)
-    angular_momentum_constraint.set_smpl(opt.model.smpl)
-    angular_momentum_constraint.set_normalizer(opt.model.normalizer)
-    opt.constraint = angular_momentum_constraint
-
+def get_samples_NFEs(opt, shape):
     extra_args = {}
+    NUM_TIMESTEPS = opt.NUM_TIMESTEPS
+    NFEs = torch.ones(samples.shape[0]) * NUM_TIMESTEPS
     if opt.method == "dps":
         extra_args["weight"] = 0.1
         samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
@@ -44,18 +37,26 @@ def main_angular_momentum(opt):
                                                  gr=extra_args["gr"])
     elif opt.method == "trust":
         extra_args["norm_upper_bound"] = opt.max_norm
-        extra_args["iterations_max"] = 5
-        extra_args["gradient_norm"] = 1
+        extra_args["iterations_max"] = opt.J if opt.J is not None else 5
+        extra_args["gradient_norm"] = opt.gradient_norm if opt.gradient_norm is not None else 1
         extra_args["iteration_func"] = lambda time_next: 1  # 1
         opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
                                                  norm_upper_bound=extra_args["norm_upper_bound"],
                                                  iterations_max=extra_args["iterations_max"],
-                                                 gradient_norm=extra_args["gradient_norm"],
-                                                 refine=opt.refine
-                                                 )
-        samples, traj_found = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS,
-                                                           constraint_obj=opt.constraint, debug=True)
+                                                 gradient_norm=extra_args["gradient_norm"])
+        samples, NFEs = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, debug=True)
+    return samples, NFEs
 
+
+def main_angular_momentum(opt):
+    shape = (1, 60, 139)
+    targets = torch.tensor([5, 0])
+    angular_momentum_constraint = AngularMomentumConstraint(0.8, targets)
+    angular_momentum_constraint.set_smpl(opt.model.smpl)
+    angular_momentum_constraint.set_normalizer(opt.model.normalizer)
+    opt.constraint = angular_momentum_constraint
+
+    samples, _ = get_samples_NFEs(opt, shape)
     long_sample = opt.constraint.stack_samples(samples)
 
     just_render_simple(
@@ -88,39 +89,14 @@ def main_angular_momentum(opt):
 
 
 def main_crawl(opt):
-    batch_size = opt.batch_size
-    NUM_TIMESTEPS = opt.NUM_TIMESTEPS
     shape = (1, 60, 139)
-
     targets = torch.tensor([5, 0])
     crawl_constraint = CrawlConstraint(0.7, targets)
     crawl_constraint.set_smpl(opt.model.smpl)
     crawl_constraint.set_normalizer(opt.model.normalizer)
     opt.constraint = crawl_constraint
 
-    extra_args = {}
-    if opt.method == "dps":
-        extra_args["weight"] = 0.1
-        samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 weight=extra_args["weight"])
-    elif opt.method == "dsg":
-        extra_args["gr"] = 0.1
-        samples = opt.model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 gr=extra_args["gr"])
-    elif opt.method == "trust":
-        extra_args["norm_upper_bound"] = opt.max_norm
-        extra_args["iterations_max"] = 5
-        extra_args["gradient_norm"] = 1
-        extra_args["iteration_func"] = lambda time_next: 1  # 1
-        opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
-                                                 norm_upper_bound=extra_args["norm_upper_bound"],
-                                                 iterations_max=extra_args["iterations_max"],
-                                                 gradient_norm=extra_args["gradient_norm"],
-                                                 refine=opt.refine
-                                                 )
-        samples, traj_found = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS,
-                                                           constraint_obj=opt.constraint, debug=True)
-
+    samples, _ = get_samples_NFEs(opt, shape)
     long_sample = opt.constraint.stack_samples(samples)
 
     just_render_simple(
@@ -175,43 +151,7 @@ def main_high_jump(opt):
         opt.constraint = high_hand_constraint
 
         if opt.generate_motions:
-            extra_args = {}
-            if opt.method == "dps":
-                extra_args["weight"] = 0.1
-                samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                         weight=extra_args["weight"])
-                NFEs = torch.ones(samples.shape[0]) * NUM_TIMESTEPS
-            elif opt.method == "dsg":
-                extra_args["gr"] = 0.1
-                samples = opt.model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                         gr=extra_args["gr"])
-                NFEs = torch.ones(samples.shape[0]) * NUM_TIMESTEPS
-            elif opt.method == "trust":
-                extra_args["norm_upper_bound"] = opt.max_norm
-                extra_args["iterations_max"] = opt.J
-                extra_args["gradient_norm"] = 1
-                extra_args["iteration_func"] = lambda time_next: 1  # 1
-                opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
-                                                         norm_upper_bound=extra_args["norm_upper_bound"],
-                                                         iterations_max=extra_args["iterations_max"],
-                                                         gradient_norm=extra_args["gradient_norm"],
-                                                         refine=opt.refine
-                                                         )
-                samples, traj_found, NFEs = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS,
-                                                                   constraint_obj=opt.constraint, debug=True)
-            elif opt.method == "trust_Jschedule":
-                extra_args["norm_upper_bound"] = opt.max_norm
-                extra_args["iterations_max"] = opt.J_sequence
-                extra_args["gradient_norm"] = 1
-                extra_args["iteration_func"] = lambda time_next: 1  # 1
-                opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
-                                                         norm_upper_bound=extra_args["norm_upper_bound"],
-                                                         iterations_max=extra_args["iterations_max"],
-                                                         gradient_norm=extra_args["gradient_norm"],
-                                                         refine=opt.refine
-                                                         )
-                samples, traj_found, NFEs = model.diffusion.trust_sample_Jschedule(shape, sample_steps=NUM_TIMESTEPS,
-                                                                         constraint_obj=opt.constraint, debug=True)
+            samples, NFEs = get_samples_NFEs(opt, shape)
             just_render_simple(
                 opt.model.smpl,
                 samples[:5,...],
@@ -256,36 +196,9 @@ def main_high_jump(opt):
         return (NFEs_mean.item(), NFEs_std.item(), constraint_violations_mean.item(), constraint_violations_std.item(), pred_noises_mean.item(), pred_noises_std.item())
 
 
-
-
 def main_obstacle_avoidance(opt):
-
-    # # # generate 250 endpoints in the x,y plane that are x,y locations between the circles with radius 3 and 6
-    # endpoints_1 = torch.cat(((torch.rand((25, 1)) * 3 + 3).reshape(-1,1), (torch.rand((25, 1)) * 3 + 3).reshape(-1,1)), dim=1)
-    # endpoints_2 = torch.cat((-(torch.rand((25, 1)) * 3 + 3).reshape(-1,1), (torch.rand((25, 1)) * 3 + 3).reshape(-1,1)), dim=1)
-    # endpoints_3 = torch.cat((-(torch.rand((25, 1)) * 3 + 3).reshape(-1,1), -(torch.rand((25, 1)) * 3 + 3).reshape(-1,1)), dim=1)
-    # endpoints_4 = torch.cat(((torch.rand((25, 1)) * 3 + 3).reshape(-1,1), -(torch.rand((25, 1)) * 3 + 3).reshape(-1,1)), dim=1)
-    # targets = torch.cat((endpoints_1, endpoints_2, endpoints_3, endpoints_4), dim=0)
-    # #
-    # # generate obstacle centers between (0,0) and targets
-    # obstacles_1 = targets / 3 + torch.rand(100,2)-0.5
-    # obstacles_2 = targets / 2 + torch.rand(100,2)-0.5
-    # obstacles_3 = targets / 1.5 + torch.rand(100,2)-0.5
-    # obstacles = torch.stack((obstacles_1, obstacles_2, obstacles_3), dim=-1)
-    # size = torch.rand(100,1,3)*0.5+0.5
-    # z_coord = torch.zeros(100,1,3)
-    # obstacles = torch.cat((obstacles, z_coord, size), dim=1)
-    # torch.save(obstacles,'obstacles')
-    # torch.save(targets, 'targets')
-
     obstacles = torch.load('obstacles')
     targets = torch.load('targets')
-
-    batch_size = opt.batch_size
-    NUM_TIMESTEPS = opt.NUM_TIMESTEPS
-
-
-
     constraint_violations = []
     NFEs = []
     for j in range(targets.shape[0]):
@@ -304,34 +217,8 @@ def main_obstacle_avoidance(opt):
         if not os.path.isdir(motion_name_j):
             os.makedirs(motion_name_j)
 
-
-
         if opt.generate_motions:
-            extra_args = {}
-            if opt.method == "dps":
-                extra_args["weight"] = 0.1
-                samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                         weight=extra_args["weight"])
-                NFEs = torch.ones(samples.shape[0]) * NUM_TIMESTEPS
-            elif opt.method == "dsg":
-                extra_args["gr"] = 0.1
-                samples = opt.model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                         gr=extra_args["gr"])
-                NFEs = torch.ones(samples.shape[0]) * NUM_TIMESTEPS
-            elif opt.method == "trust":
-                extra_args["norm_upper_bound"] = opt.max_norm
-                extra_args["iterations_max"] = opt.J
-                extra_args["gradient_norm"] = 1
-                extra_args["iteration_func"] = lambda time_next: 1  # 1
-                opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
-                                                         norm_upper_bound=extra_args["norm_upper_bound"],
-                                                         iterations_max=extra_args["iterations_max"],
-                                                         gradient_norm=extra_args["gradient_norm"],
-                                                         refine=opt.refine
-                                                         )
-                samples, traj_found, NFEs = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS,
-                                                                   constraint_obj=opt.constraint, debug=True)
-
+            samples, NFEs = get_samples_NFEs(opt, shape)
             long_sample = opt.constraint.stack_samples(samples)
             NFEs = torch.mean(NFEs)
 
@@ -362,39 +249,16 @@ def main_obstacle_avoidance(opt):
 
 
 def main_obstacle_avoidance_(opt):
-    batch_size = opt.batch_size
-    NUM_TIMESTEPS = opt.NUM_TIMESTEPS
+    obstacles = torch.load('obstacles')
+    targets = torch.load('targets')
     shape = (2, 60, 139)
-
 
     obstacle_constraint = ObstacleAvoidance(obstacles, targets)
     obstacle_constraint.set_smpl(opt.model.smpl)
     obstacle_constraint.set_normalizer(opt.model.normalizer)
     opt.constraint = obstacle_constraint
 
-    extra_args = {}
-    if opt.method == "dps":
-        extra_args["weight"] = 0.1
-        samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 weight=extra_args["weight"])
-    elif opt.method == "dsg":
-        extra_args["gr"] = 0.1
-        samples = opt.model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 gr=extra_args["gr"])
-    elif opt.method == "trust":
-        extra_args["norm_upper_bound"] = opt.max_norm
-        extra_args["iterations_max"] = 5
-        extra_args["gradient_norm"] = 1
-        extra_args["iteration_func"] = lambda time_next: 1  # 1
-        opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
-                                                 norm_upper_bound=extra_args["norm_upper_bound"],
-                                                 iterations_max=extra_args["iterations_max"],
-                                                 gradient_norm=extra_args["gradient_norm"],
-                                                 refine=opt.refine
-                                                 )
-        samples, traj_found = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS,
-                                                           constraint_obj=opt.constraint, debug=True)
-
+    samples, _ = get_samples_NFEs(opt, shape)
     long_sample = opt.constraint.stack_samples(samples)
 
     just_render_simple_wObstacles(
@@ -426,10 +290,9 @@ def main_obstacle_avoidance_(opt):
         torch.save(samples, samples_file)
 
 
-
 def main_long_form_control(opt):
-    batch_size = opt.batch_size
-    NUM_TIMESTEPS = opt.NUM_TIMESTEPS
+    obstacles = torch.load('obstacles')
+    targets = torch.load('targets')
     shape = (4, 60, 139)
     const = LongFormMotion(shape[0], opt.target)
     const.set_normalizer(opt.model.normalizer)
@@ -446,29 +309,7 @@ def main_long_form_control(opt):
     # sample = torch.ones((shape)).to('cuda')
     obstacle_constraint.constraint(sample)
 
-    extra_args = {}
-    if opt.method == "dps":
-        extra_args["weight"] = 0.1
-        samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 weight=extra_args["weight"])
-    elif opt.method == "dsg":
-        extra_args["gr"] = 0.1
-        samples = opt.model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
-                                                 gr=extra_args["gr"])
-    elif opt.method == "trust":
-        extra_args["norm_upper_bound"] = opt.max_norm
-        extra_args["iterations_max"] = 5
-        extra_args["gradient_norm"] = 1
-        extra_args["iteration_func"] = lambda time_next: 1  # 1
-        opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
-                                                 norm_upper_bound=extra_args["norm_upper_bound"],
-                                                 iterations_max=extra_args["iterations_max"],
-                                                 gradient_norm=extra_args["gradient_norm"],
-                                                 refine=opt.refine
-                                                 )
-        samples, traj_found = model.diffusion.trust_sample(shape, sample_steps=NUM_TIMESTEPS,
-                                                           constraint_obj=opt.constraint, debug=True)
-
+    samples, _ = get_samples_NFEs(opt, shape)
     long_sample = const.stack_samples(samples)
 
     just_render_simple(
@@ -498,6 +339,7 @@ def main_long_form_control(opt):
         if torch.isnan(samples).any():
             print()
         torch.save(samples, samples_file)
+
 
 def get_metrics(opt, motion_list):
     # if opt.method == "trust":
@@ -537,14 +379,7 @@ def get_metrics(opt, motion_list):
     print('95 percentile:', torch.kthvalue(torch.stack(continuities), int(0.95 * len(continuities)))[0])
 
 
-
-
 if __name__ == "__main__":
-
-    # x_target = 8 * (torch.rand((500,)) )
-    # y_target = 8 * (torch.rand((500,)) )
-    # targets = torch.stack((x_target, y_target), dim=1)
-    # torch.save(targets, "targets_long_form.pt")
     targets_long_form = torch.load("targets_long_form.pt")
 
     # GENERAL SETTINGS
@@ -575,17 +410,13 @@ if __name__ == "__main__":
     Js = [3,4,5,6,7,8, 9, 10] #
     # Js = [8, 9, 10]
 
-    from diffusion.diffusion import generate_sequence
-
-
-
     opt.refine = False
     opt.generate_motions = False
     opt.get_metrics = True
     all_metrics = []
     metrics_cols = []
     metrics_rows = []
-    for method in ["trust", "dsg", "dps", "trust_Jschedule"][-1:]:
+    for method in ["trust", "dsg", "dps"]:
         opt.method = method
         if opt.method == "trust":
             opt.NUM_TIMESTEPS = 50
@@ -611,27 +442,6 @@ if __name__ == "__main__":
                     else:
                         metrics_rows.append(str(opt.max_norm))
                     # main_obstacle_avoidance(opt)
-        elif opt.method == "trust_Jschedule":
-            for scheme_start in ['1']:
-                for total_sum in [150,200]:
-                    opt.J_sequence = generate_sequence(50, total_sum)
-                    opt.J_schedule = True
-                    opt.NUM_TIMESTEPS = 50
-                    for i_max_norm in range(len(max_norms)):
-                        opt.max_norm = max_norms[i_max_norm]
-                        # opt.J = Js[i_J]
-                        opt.motion_name = os.path.join(opt.motion_save_dir,
-                                                       f"{opt.method}" + str(opt.NUM_TIMESTEPS)+  '_' + str(
-                                opt.max_norm) +'_'+ str(total_sum) + '_' + "Jschedule_" + scheme_start)
-                        opt.render_name = os.path.join(opt.render_dir, f"{opt.method}" + str(opt.NUM_TIMESTEPS) + '_' + str(
-                                opt.max_norm) +'_'+ str(total_sum) + '_' + "Jschedule_" + scheme_start)
-                        metrics = main_high_jump(opt)
-                        all_metrics.append(metrics)
-                        metrics_cols.append(f"{opt.method}" + "_" +scheme_start+ "_" + str(total_sum))
-                        if opt.max_norm < 1000:
-                            metrics_rows.append('00'+str(opt.max_norm))
-                        else:
-                            metrics_rows.append(str(opt.max_norm))
 
         else:
             opt.NUM_TIMESTEPS = 200
@@ -653,7 +463,6 @@ if __name__ == "__main__":
     score_names = ['NFEs', 'constraint_violations', 'pred_noises']
     # generate a csv file with metrics and colheaders for rows and cols are described by metrics_rows and metrics_cols
     output_file = 'high_jump_constraint_violations.csv'
-    import csv
     # Write to CSV
 
 
@@ -689,23 +498,3 @@ if __name__ == "__main__":
                 writer.writerow([row_header] + list(score_row))
 
     print('Metrics saved to:', output_file)
-
-        # opt.target = targets_long_form[i]
-        # main_obstacle_avoidance(opt)
-
-        # main_crawl(opt)
-        # main_angular_momentum(opt)
-        #
-        # if opt.method == "trust":
-        #     refine_suffix = ''
-        #     if opt.refine:
-        #         refine_suffix = 'refine'
-        #     motion_name = os.path.join(opt.motion_save_dir,
-        #                                f"{opt.method}" + str(opt.NUM_TIMESTEPS) + '_' + str(opt.max_norm) + '_' + refine_suffix)
-        # else:
-        #     motion_name = os.path.join(opt.motion_save_dir, f"{opt.method}" + str(opt.NUM_TIMESTEPS))
-        # opt.motion_name = motion_name
-        # motion_list = os.listdir(motion_name)
-        # get_metrics(opt, motion_list)
-
-

@@ -14,7 +14,6 @@ from constraints.specified_points import SpecifiedPointConstraint
 from constraints.end_effector import EndEffectorConstraint
 from constraints.kinetic_energy import KineticEnergyConstraint
 from constraints.combine import Combine
-from constraints.nothing import NoConstraint
 from evaluator import get_all_metrics
 
 X_START, Y_START = -0.107, -0.1545
@@ -49,11 +48,7 @@ def main(opt):
     print(f'Generating {NUM} normal sample{"" if NUM == 1 else "s"}...')
     shape = (NUM, model.horizon, model.repr_dim)
     extra_args = {}
-    # samples = model.diffusion.ddim_sample(shape)
-    # samples = model.normalizer.unnormalize(samples)
-    # just_render_simple_long_clip(model.smpl, samples[:10], model.normalizer, render_out='./test',
-    #                              constraint=None)
-
+    
     if opt.method == "dps":
         NUM_TIMESTEPS = 250
         extra_args["weight"] = 0.3
@@ -68,7 +63,7 @@ def main(opt):
         extra_args["gradient_norm"] = 1
         extra_args["iteration_func"] = lambda time_next: 1 # 1
         model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"], norm_upper_bound=extra_args["norm_upper_bound"], iterations_max=extra_args["iterations_max"], gradient_norm=extra_args["gradient_norm"])
-        samples, traj_found = model.diffusion.trust_sample(shape, constraint_obj=opt.constraint, debug=True)
+        samples = model.diffusion.trust_sample(shape, constraint_obj=opt.constraint)
 
     print(f'Finished generating trust samples.')
     if opt.save_motions:
@@ -81,12 +76,6 @@ def main(opt):
         render_dir = os.path.join(opt.render_dir, f"{opt.model_name}_{opt.constraint}/{opt.method}")
         if not os.path.isdir(render_dir): os.makedirs(render_dir)
         just_render_simple_long_clip(model.smpl, samples[:NUM_Render], model.normalizer, render_out=render_dir, constraint=opt.constraint)
-
-        # if opt.method == "trust":
-        #     print(f'Rendering trajectory changes...')
-        #     ani = trajectory_animation(traj_found, traj)
-        #     ani.save(os.path.join(render_dir, 'trajectory.mp4'), writer='ffmpeg')
-
         print('Finished rendering samples.\n')
     
     get_all_metrics(samples, opt.constraint, model, exp_name=f"{opt.model_name}_{opt.method}_{opt.constraint}")
@@ -139,8 +128,6 @@ if __name__ == "__main__":
     #     KineticEnergyConstraint(KE=10)
     # )
     # const.set_name("cartwheel_please")
-    
-    const = NoConstraint()
     
     opt.constraint = const
     for method in ["dps", "dsg", "trust"][2:]:

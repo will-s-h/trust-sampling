@@ -49,7 +49,7 @@ def main(args):
     model_config = load_yaml("./ffhq_model_config.yaml" if args.model == "ffhq" else "./imagenet_model_config.yaml")
     model = create_model(**model_config).to('cuda')
 
-    all_paths = all_image_paths(args.dataset_path)
+    all_paths = all_image_paths(args.dataset_path)[:4]
     batch_size = 1
     if args.constraint == "inpaint":
         masks = torch.load('../dataset/masks.pt')
@@ -98,10 +98,10 @@ def main(args):
             extra_args["iteration_func"] = lambda time_next: 1 # 1
             diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"], norm_upper_bound=extra_args["norm_upper_bound"], iterations_max=extra_args["iterations_max"], gradient_norm=extra_args["gradient_norm"])
             samples, nfes = diffusion.trust_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, debug=True)
-            avg_nfes += nfes / (len(all_paths) // batch_size)
+            avg_nfes += torch.mean(nfes).item() / (len(all_paths) // batch_size)
 
         # plot all experiments
-        save_dir = f"schedules/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
+        save_dir = f"test/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
         if not os.path.exists(save_dir): os.makedirs(save_dir)
 
         for i, sample in enumerate(samples):

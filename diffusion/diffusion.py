@@ -338,93 +338,6 @@ class GaussianDiffusion(nn.Module):
         self.refine = refine
 
     @torch.no_grad()
-    def trust_sample_Jschedule(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False,
-                     **kwargs):
-        batch, device, total_timesteps, sampling_timesteps, eta = shape[
-            0], self.betas.device, self.n_timestep, sample_steps, 1
-        assert constraint_obj is not None, "must pass in constraint object!"
-        assert (
-                    not save_intermediates or not debug), "cannot both save intermediates and be in debug mode. must pick one of the two!"
-
-        times = torch.linspace(-1, total_timesteps - 1,
-                               steps=sampling_timesteps + 1)  # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
-        times = list(reversed(times.int().tolist()))
-        time_pairs = list(zip(times[:-1], times[1:]))  # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
-
-        x = torch.randn(shape, device=device)
-
-        x_start = None
-        traj, intermediates = [], []
-        if debug: traj.append((self._get_trajectory(x), 1001, 'starting trajectory'))
-        if save_intermediates: intermediates.append(x)
-
-        neural_function_evals = torch.zeros(x.shape[0], dtype=torch.float)
-        J_schedule_counter = 0
-        for time, time_next in tqdm(time_pairs, desc='sampling loop time step'):
-            iterations = self.iteration_func(time_next)
-            self.current_iterations_max = self.iterations_max[J_schedule_counter]
-            J_schedule_counter += 1
-            for _ in range(iterations):
-
-                time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
-                pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
-                neural_function_evals += 1
-
-                if debug: traj.append((self._get_trajectory(x_start), time, 'diffusion step'))
-
-                if time_next < 0:  # we are in the last step
-                    pred_noise, *_ = self.model_predictions(x_start, time_cond, clip_x_start=self.clip_denoised)
-                    # print(f'final norm: {torch.norm(pred_noise).item()}')
-                    if save_intermediates: intermediates.append(x_start)
-                    x = x_start
-                    break
-
-                # apply diffusion noise again, except with one less step of noise than what was denoised.
-                alpha = self.alphas_cumprod[time]
-                alpha_next = self.alphas_cumprod[time_next]
-                sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
-                c = (1 - alpha_next - sigma ** 2).sqrt()
-
-                model_mean = x_start * alpha_next.sqrt() + c * pred_noise
-                new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
-                gradient_iterations = torch.zeros((batch, 1))
-                norm_noise = torch.norm(new_pred_noise, dim=(-2, -1)).cpu()
-                grad_step = (gradient_iterations < self.current_iterations_max).squeeze() * (
-                            norm_noise <= self.norm_upper_bound)
-
-                while grad_step.any():
-                    g = constraint_obj.gradient(model_mean, lambda x: self.model_predictions(x, time_cond,
-                                                                                             clip_x_start=self.clip_denoised))
-                    norms = torch.norm(g.view(g.shape[0], -1), dim=1).view(
-                        (g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(
-                        g.shape) + 1e-6  # avoid div by 0
-                    g *= self.gradient_norm / norms
-                    model_mean = model_mean + grad_step.unsqueeze(-1).unsqueeze(-1).to('cuda') * g
-                    if debug: traj.append((self._get_trajectory(model_mean), time, 'gradient step'))
-                    gradient_iterations += grad_step.unsqueeze(-1)
-                    new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
-                    neural_function_evals += grad_step
-                    norm_noise = torch.norm(new_pred_noise, dim=(-2, -1)).cpu()
-                    grad_step = (gradient_iterations < self.current_iterations_max).squeeze() * (
-                            norm_noise <= self.norm_upper_bound)
-
-                noise = torch.randn_like(x)
-                x = model_mean + sigma * noise
-
-                if debug: traj.append((self._get_trajectory(x), time, 'noise'))
-            if save_intermediates: intermediates.append(x)
-
-        print(f"neural evaluations: {neural_function_evals}")
-        print(constraint_obj.constraint(x))
-        # long_sample = constraint_obj.normalizer.unnormalize(constraint_obj.stack_samples(x))
-        # long_sample_before = constraint_obj.normalizer.unnormalize(constraint_obj.stack_samples(x_start_before))
-        if debug: return (x, traj, neural_function_evals)
-        if save_intermediates: return intermediates
-
-        return x
-
-
-    @torch.no_grad()
     def trust_sample(self, shape, sample_steps=50, constraint_obj=None, save_intermediates=False, debug=False, **kwargs):
         batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
         assert constraint_obj is not None, "must pass in constraint object!"
@@ -435,9 +348,9 @@ class GaussianDiffusion(nn.Module):
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
         reduce_dims, ones = tuple([i for i in range(1, len(shape))]), tuple([1 for i in range(1, len(shape))])
         
-        x = torch.randn(shape, device = device)
+        x = torch.randn(shape, device=device)
         x_start = None
-        neural_function_evals = 0
+        neural_function_evals = torch.zeros(x.shape[0], dtype=torch.float, device=device)
         traj, intermediates = [], []
         if save_intermediates: intermediates.append(x)
         # if debug: traj.append((self._get_trajectory(x), 1001, 'starting trajectory'))
@@ -476,6 +389,7 @@ class GaussianDiffusion(nn.Module):
                 j = 0
                 
                 # while any sample is within trust region
+                delta_NFEs = torch.ones(x.shape[0], device=device).float()
                 iterations_max = self.iterations_max if isinstance(self.iterations_max, int) else self.iterations_max(time)
                 while j < iterations_max and torch.min(pred_noise_norms).item() <= self.norm_upper_bound:
                     # calculate gradients
@@ -493,10 +407,10 @@ class GaussianDiffusion(nn.Module):
                     
                     # zero out the gradient of samples that are outside of the trust region
                     g *= (pred_noise_norms <= self.norm_upper_bound).int().view((-1,) + ones)
+                    delta_NFEs += (pred_noise_norms <= self.norm_upper_bound).float()
 
                     # update model_mean
                     model_mean = model_mean + g
-                    # if debug: traj.append((self._get_trajectory(model_mean), time, 'gradient step'))
                     
                     # calculate whether or not to take another step
                     j += 1
@@ -507,16 +421,14 @@ class GaussianDiffusion(nn.Module):
                     pred_noise_norms = torch.norm(new_pred_noise, dim=reduce_dims, p=2)
                     
                 #####################################
-                neural_function_evals += min(j+1, iterations_max)
+                neural_function_evals += torch.clamp(delta_NFEs, max=iterations_max)
                 x = model_mean + sigma * noise
-                # if debug: traj.append((self._get_trajectory(x), time, 'noise'))
                 
             if save_intermediates: intermediates.append(x)
         
-        print(f"neural evaluations: {neural_function_evals}")
+        print(f"neural evaluations (avg across samples): {torch.mean(neural_function_evals).item()}")
         if debug: return (x, neural_function_evals)
         if save_intermediates: return intermediates
-
         return x
 
 
