@@ -144,5 +144,6 @@ def parse_test_opt():
         default="./data/AMASS_agreggated_sliced",
         help="directory in which training data can be found"
     )
+    parser.add_argument("--batch_size", type=int, default=100, help="batch size")
     opt = parser.parse_args()
     return opt

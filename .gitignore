@@ -1,1 +1,7 @@
 */**/__pycache__/
+/data/AMASS_test/*
+/data/AMASS_test_aggregated/*
+/data/AMASS_test_aggregated_sliced/*
+demo_motion/renders/*
+demo_motion/motions/*
+runs/*

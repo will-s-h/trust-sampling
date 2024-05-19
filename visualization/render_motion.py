@@ -1,15 +1,16 @@
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import librosa as lr
+# import librosa as lr
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
-import soundfile as sf
+# import soundfile as sf
 import torch
 from matplotlib import cm
 from pytorch3d.transforms import axis_angle_to_quaternion, quaternion_apply, quaternion_multiply
-from p_tqdm import p_map
+# from p_tqdm import p_map
+import warnings
 
 from dataset.quaternion import ax_from_6v
 
@@ -99,6 +100,7 @@ smpl_offsets = [
 def set_line_data_3d(line, x):
     line.set_data(x[:, :2].T)
     line.set_3d_properties(x[:, 2])
+    line.set
 
 
 def set_scatter_data_3d(scat, x, c):
@@ -125,8 +127,59 @@ def get_axrange(poses):
     biggestdiff = max([xdiff, ydiff, zdiff])
     return biggestdiff
 
+def plot_two_poses(num, poses, lines, ax, axrange, scat, contact, text, colors):
+    pose = poses[:,num]
+    static = contact[:,num]
+    indices = [7, 8, 10, 11]
 
-def plot_single_pose(num, poses, lines, ax, axrange, scat, contact, text, colors):
+    # plot frame number in animation
+    text.set_text(f'Frame {num + 1}')
+    if num in colors:
+        text.set_color(colors[num])
+
+    for i, (point, idx) in enumerate(zip(scat[0], indices)):
+        position = pose[0,idx : idx + 1]
+        color = "r" if static[0,i] else "g"
+        set_scatter_data_3d(point, position, color)
+
+    for i, (point, idx) in enumerate(zip(scat[1], indices)):
+        position = pose[1,idx : idx + 1]
+        color = "r" if static[1,i] else "g"
+        set_scatter_data_3d(point, position, color)
+
+    for i, (p, line) in enumerate(zip(smpl_parents, lines[0])):
+        # don't plot root
+        if i == 0:
+            continue
+        # stack to create a line
+        data = np.stack((pose[0,i], pose[0,p]), axis=0)
+        set_line_data_3d(line, data)
+
+    for i, (p, line) in enumerate(zip(smpl_parents, lines[1])):
+        # don't plot root
+        if i == 0:
+            continue
+        # stack to create a line
+        data = np.stack((pose[1,i], pose[1,p]), axis=0)
+        set_line_data_3d(line, data)
+
+
+    if num == 0:
+        if isinstance(axrange, int):
+            axrange = (axrange, axrange, axrange)
+        xcenter, ycenter, zcenter = 0, 0, 1.5
+        stepx, stepy, stepz = axrange[0] / 2, axrange[1] / 2, axrange[2] / 2
+
+        x_min, x_max = xcenter - stepx, xcenter + stepx
+        y_min, y_max = ycenter - stepy, ycenter + stepy
+        z_min, z_max = zcenter - stepz, zcenter + stepz
+
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.set_zlim(z_min, z_max)
+
+
+def plot_single_pose(num, poses, lines, ax, axrange, scat, contact, text, colors, obstacles=None):
     pose = poses[num]
     static = contact[num]
     indices = [7, 8, 10, 11]
@@ -152,17 +205,106 @@ def plot_single_pose(num, poses, lines, ax, axrange, scat, contact, text, colors
     if num == 0:
         if isinstance(axrange, int):
             axrange = (axrange, axrange, axrange)
-        xcenter, ycenter, zcenter = 0, 0, 2.5
+        xcenter, ycenter, zcenter = 0, 0, 1.5
         stepx, stepy, stepz = axrange[0] / 2, axrange[1] / 2, axrange[2] / 2
 
         x_min, x_max = xcenter - stepx, xcenter + stepx
         y_min, y_max = ycenter - stepy, ycenter + stepy
-        z_min, z_max = zcenter - stepz, zcenter + stepz
+        # z_min, z_max = zcenter - stepz, zcenter + stepz
+        z_min, z_max = 0, 3
+
 
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
         ax.set_zlim(z_min, z_max)
+        # set aspect ratio
+        ax.set_box_aspect([1, 1, 3/5])
 
+    # add spheres to the ax to show obstacles
+    if obstacles is not None:
+        for obstacle in obstacles:
+            ax.scatter(obstacle[0], obstacle[1], obstacle[2], s=100*obstacle[3], c='r')
+
+
+def two_skeleton_render(
+        poses,
+        out="renders",
+        contact=None,
+        colors=None,
+        constraint=None,
+):
+    # generate the pose with FK
+    Path(out).mkdir(parents=True, exist_ok=True)
+    num_steps = poses.shape[1]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d", computed_zorder=False)  # computed_zorder kwarg requires matplotlib >= 3.5.0
+
+    point = np.array([0, 0, 1])
+    normal = np.array([0, 0, 1])
+    d = -point.dot(normal)
+    xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
+    z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
+    # plot the plane
+    ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
+    # Create lines initially without data
+    lines_0 = [
+        ax.plot([], [], [], zorder=10, linewidth=1.5, c = 'k')[0]
+        for _ in smpl_parents
+    ]
+    lines_1 = [
+        ax.plot([], [], [], zorder=10, linewidth=1.5, c = 'c')[0]
+        for _ in smpl_parents
+    ]
+    lines = [lines_0, lines_1]
+    scat_0 = [
+        # ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
+        ax.scatter([], [], [], zorder=10, s=10)
+
+        for _ in range(4)
+    ]
+    scat_1 = [
+        # ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
+        ax.scatter([], [], [], zorder=10, s=10)
+
+        for _ in range(4)
+    ]
+    scat = [scat_0, scat_1]
+    axrange = 3
+
+    # add text, colors, constraint
+    text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
+    colors = colors if isinstance(colors, dict) else {}
+    if constraint is not None and hasattr(constraint, "plot"):
+        constraint.plot(fig, ax)
+
+    # create contact labels
+    if contact is None:
+        # the current heuristic says that the feet are in contact
+        feet = poses[:, :, (7, 8, 10, 11), :]
+        feetv = np.zeros(feet.shape[:3])
+        feetv[:,:-1,...] = np.linalg.norm(feet[:,1:,...] - feet[:,:-1,...], axis=-1)
+        HEURISTIC = 0.02  # in original code, was 0.01
+        contact = feetv < HEURISTIC
+    else:
+        contact = contact > 0.95
+    # Creating the Animation object
+    anim = animation.FuncAnimation(
+        fig,
+        plot_two_poses,
+        num_steps,
+        fargs=(poses, lines, ax, axrange, scat, contact, text, colors),
+        interval=1000 // 20,
+    )
+
+    # actually save the gif
+    path = os.path.normpath(out)
+    pathparts = path.split(os.sep)
+    # previously, this was done with writer = animation.HTMLWriter(fps=20), and with .motion.html
+    # ffmpeg may require updates; to do so, run `conda update ffmpeg` in command line
+    gifname = os.path.join(out, f"{pathparts[-1]}" + ".mp4")
+    anim.save(gifname, writer='ffmpeg', fps=20)
+    plt.close()
 
 def skeleton_render(
     poses,
@@ -196,7 +338,7 @@ def skeleton_render(
 
         for _ in range(4)
     ]
-    axrange = 3
+    axrange = 10
 
     # add text, colors, constraint
     text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
@@ -232,6 +374,75 @@ def skeleton_render(
     anim.save(gifname, writer='ffmpeg', fps=20)
     plt.close()
 
+
+def skeleton_render_wObstacle(
+        poses,
+        out="renders",
+        obstacles=None,
+        contact=None,
+        colors=None,
+        constraint=None,
+):
+    # generate the pose with FK
+    Path(out).mkdir(parents=True, exist_ok=True)
+    num_steps = poses.shape[0]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d", computed_zorder=False)  # computed_zorder kwarg requires matplotlib >= 3.5.0
+
+    point = np.array([0, 0, 1])
+    normal = np.array([0, 0, 1])
+    d = -point.dot(normal)
+    xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
+    z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
+    # plot the plane
+    ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
+    # Create lines initially without data
+    lines = [
+        ax.plot([], [], [], zorder=10, linewidth=1.5)[0]
+        for _ in smpl_parents
+    ]
+    scat = [
+        # ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
+        ax.scatter([], [], [], zorder=10, s=10)
+
+        for _ in range(4)
+    ]
+    axrange = 5
+
+    # add text, colors, constraint
+    text = ax.text2D(0, 0, "Frame 0", transform=ax.transAxes, zorder=100)
+    colors = colors if isinstance(colors, dict) else {}
+    if constraint is not None and hasattr(constraint, "plot"):
+        constraint.plot(fig, ax)
+
+    # create contact labels
+    if contact is None:
+        # the current heuristic says that the feet are in contact
+        feet = poses[:, (7, 8, 10, 11)]
+        feetv = np.zeros(feet.shape[:2])
+        feetv[:-1] = np.linalg.norm(feet[1:] - feet[:-1], axis=-1)
+        HEURISTIC = 0.02  # in original code, was 0.01
+        contact = feetv < HEURISTIC
+    else:
+        contact = contact > 0.95
+    # Creating the Animation object
+    anim = animation.FuncAnimation(
+        fig,
+        plot_single_pose,
+        num_steps,
+        fargs=(poses, lines, ax, axrange, scat, contact, text, colors, obstacles),
+        interval=1000 // 20,
+    )
+
+    # actually save the gif
+    path = os.path.normpath(out)
+    pathparts = path.split(os.sep)
+    # previously, this was done with writer = animation.HTMLWriter(fps=20), and with .motion.html
+    # ffmpeg may require updates; to do so, run `conda update ffmpeg` in command line
+    gifname = os.path.join(out, f"{pathparts[-1]}" + ".mp4")
+    anim.save(gifname, writer='ffmpeg', fps=20)
+    plt.close()
 
 class SMPLSkeleton:
     def __init__(
@@ -340,7 +551,7 @@ def just_render_simple(
         contact = sample_contact[num] if sample_contact is not None else None
         skeleton_render(
             pose,
-            out=render_out,
+            out=render_out +'/' + str(num),
             contact=contact,
             colors=colors,
             constraint=constraint
@@ -350,7 +561,137 @@ def just_render_simple(
         inner(xx)
         
     # p_map(inner, enumerate(poses))
-    
+
+
+def just_render_simple_wObstacles(
+        smpl: SMPLSkeleton,
+        model_output,
+        normalizer,
+        render_out,
+        obstacles=None,
+        colors=None,
+        constraint=None):
+    samples = model_output
+    samples = normalizer.unnormalize(samples)
+    if obstacles is None:
+        raise ValueError("Obstacles must be set")
+    if samples.shape[2] != 135:
+        sample_contact, samples = torch.split(
+            samples, (4, samples.shape[2] - 4), dim=2
+        )
+        sample_contact = sample_contact.detach().cpu()
+    else:
+        sample_contact = None
+
+    # do the FK all at once
+    b, s, c = samples.shape
+    pos = samples[:, :, :3].to('cuda')  # np.zeros((sample.shape[0], 3))
+    q = samples[:, :, 3:].reshape(b, s, 22, 6)
+    # go 6d to ax
+    q = ax_from_6v(q).to('cuda')
+
+    poses = smpl.forward(q, pos).detach().cpu().numpy()
+
+    def inner(xx):
+        num, pose = xx
+
+        contact = sample_contact[num] if sample_contact is not None else None
+        skeleton_render_wObstacle(
+            pose,
+            out=render_out + '/' + str(num),
+            obstacles=obstacles,
+            contact=contact,
+            colors=colors,
+            constraint=constraint
+        )
+
+    for xx in enumerate(poses):
+        inner(xx)
+
+
+def render_to_compare(
+        smpl: SMPLSkeleton,
+        model_output,
+        normalizer,
+        render_out,
+        colors=None,
+        constraint=None):
+    samples = model_output
+    samples = normalizer.unnormalize(samples)
+
+    if samples.shape[2] != 135:
+        sample_contact, samples = torch.split(
+            samples, (4, samples.shape[2] - 4), dim=2
+        )
+        sample_contact = sample_contact.detach().cpu()
+    else:
+        sample_contact = None
+
+    # do the FK all at once
+    b, s, c = samples.shape
+    pos = samples[:, :, :3].to('cuda')  # np.zeros((sample.shape[0], 3))
+    q = samples[:, :, 3:].reshape(b, s, 22, 6)
+    # go 6d to ax
+    q = ax_from_6v(q).to('cuda')
+
+    poses = smpl.forward(q, pos).detach().cpu().numpy()
+    contact = None
+    two_skeleton_render(
+        poses,
+        out=render_out,
+        contact=contact,
+        colors=colors,
+        constraint=constraint
+    )
+
+def just_render_simple_long_clip(
+        smpl: SMPLSkeleton,
+        model_output,
+        normalizer,
+        render_out,
+        colors=None,
+        constraint=None):
+    samples = model_output
+    if normalizer == None:
+        # urge warning
+        warnings.warn('normalizer is None, assuming samples are already unnormalized')
+        print('WARNING: normalizer is None, assuming samples are already unnormalized')
+    else:
+        samples = normalizer.unnormalize(samples)
+
+    if samples.shape[2] != 135:
+        sample_contact, samples = torch.split(
+            samples, (4, samples.shape[2] - 4), dim=2
+        )
+        sample_contact = sample_contact.detach().cpu()
+    else:
+        sample_contact = None
+
+    # do the FK all at once
+    b, s, c = samples.shape
+    pos = samples[:, :, :3].to('cuda')  # np.zeros((sample.shape[0], 3))
+    q = samples[:, :, 3:].reshape(b, s, 22, 6)
+    # go 6d to ax
+    q = ax_from_6v(q).to('cuda')
+
+    poses = smpl.forward(q, pos).detach().cpu().numpy()
+    poses_stacked = np.concatenate(poses, axis=0)
+    sample_contact_stacked = np.concatenate(sample_contact.numpy(), axis=0) if sample_contact is not None else None
+    def inner(xx):
+        pose = xx
+
+        contact = sample_contact_stacked if sample_contact_stacked is not None else None
+        skeleton_render(
+            pose,
+            out=render_out + '/full',
+            contact=contact,
+            colors=colors,
+            constraint=constraint
+        )
+
+    inner(poses_stacked)
+
+    # p_map(inner, enumerate(poses))
 
 #### trajectory animation across diffusion time (see how trajectory changes over diffusion t)
 def trajectory_animation(traj, desired_traj):
