@@ -90,7 +90,14 @@ class HighJumpConstraint:
     def constraint_oneloss(self, samples):
         continuity_loss, begin_end_loss, high_hand_loss = self.constraint(samples)
         loss = continuity_loss + begin_end_loss + high_hand_loss
-        return torch.mean(loss) * (loss.unsqueeze(-1).unsqueeze(-1) / torch.mean(loss)).detach()
+        self.normalizing_factor = (loss.unsqueeze(-1).unsqueeze(-1) / torch.mean(loss)).detach() 
+        return torch.mean(loss)
+    
+    def batch_normalize_gradient(self, grad):
+        assert self.normalizing_factor is not None
+        grad *= self.normalizing_factor
+        self.normalizing_factor = None
+        return grad
         
     def gradient(self, samples, func=None):
         with torch.enable_grad():

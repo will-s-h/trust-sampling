@@ -396,6 +396,8 @@ class GaussianDiffusion(nn.Module):
                     with torch.enable_grad():
                         loss = constraint_obj.constraint_oneloss(pred_xstart) if hasattr(constraint_obj, 'constraint_oneloss') else constraint_obj.constraint(pred_xstart)
                         g = -torch.autograd.grad(loss, model_mean)[0]
+                    if hasattr(constraint_obj, 'batch_normalize_gradient'):
+                        g = constraint_obj.batch_normalize_gradient(g)
                     
                     # calculate norms to divide g by, for each sample
                     norms = (torch.norm(g.view(g.shape[0], -1), dim=1)).view((g.shape[0],) + ones).expand(g.shape) + 1e-6  # avoid div by 0

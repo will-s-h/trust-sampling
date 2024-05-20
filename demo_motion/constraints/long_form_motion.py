@@ -55,7 +55,7 @@ class LongFormMotion:
         return loss, loss_additional_constraint_3
     
     def constraint_oneloss(self, samples):
-        loss, loss_additional_constraint_3 = self.constraint(samples)
+        loss, loss_additional_constraint_3 = -self.constraint(samples)
         return loss + 0.01 * loss_additional_constraint_3
 
     def gradient(self, samples, func=None):

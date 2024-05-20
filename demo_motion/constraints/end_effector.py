@@ -96,7 +96,14 @@ class EndEffectorConstraintFootHand:
     def constraint_oneloss(self, samples):
         loss_per_batch = self.constraint(samples)
         loss = torch.mean(loss_per_batch)
-        return loss * (loss_per_batch.unsqueeze(-1).unsqueeze(-1) / loss).detach()
+        self.normalizing_factor = (loss_per_batch.unsqueeze(-1).unsqueeze(-1) / loss).detach()
+        return loss
+    
+    def batch_normalize_gradient(self, grad):
+        assert self.normalizing_factor is not None
+        grad *= self.normalizing_factor
+        self.normalizing_factor = None
+        return grad
 
     def constraint_metric(self, samples):
         loss = torch.zeros((samples.shape[0],), device=self.device)
