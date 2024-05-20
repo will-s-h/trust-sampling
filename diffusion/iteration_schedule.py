@@ -1,6 +1,8 @@
 import numpy as np
 import random
 
+## Iterations Max Schedulers ##
+
 class LinearScheduler:
     def __init__(self, start=1, end=5, steps=1000):
         self.steps = steps
@@ -13,17 +15,6 @@ class LinearScheduler:
     
     def __str__(self):
         return f"LinearSchedule_{self.start}to{self.end}"
-
-class InverseNormScheduler:
-    def __init__(self, J_scheduler, base_norm=1):
-        self.base_norm = base_norm
-        self.J_scheduler = J_scheduler
-
-    def __call__(self, time):
-        return self.base_norm / (self.J_scheduler.maxes[time] ** 0.5)
-
-    def __str__(self):
-        return f"InverseNormScheduler{self.base_norm}"
 
 class InverseScheduler:
     def __init__(self, betas=None, total_steps=1000, ddim_steps=200, nfes=1000):
@@ -42,5 +33,19 @@ class InverseScheduler:
     
     def __str__(self):
         return "InverseScheduler"
+    
+    
+## Norm Schedulers ##
+
+class InverseNormScheduler:
+    def __init__(self, J_scheduler, base_norm=1):
+        self.base_norm = base_norm
+        self.J_scheduler = J_scheduler
+
+    def __call__(self, time):
+        return self.base_norm / (self.J_scheduler.maxes[time] ** 0.5)
+
+    def __str__(self):
+        return f"InverseNormScheduler{self.base_norm}"
         
         
