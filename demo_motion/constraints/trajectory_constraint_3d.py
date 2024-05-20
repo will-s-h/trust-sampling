@@ -37,7 +37,14 @@ class TrajectoryConstraint3D:
         traj.requires_grad_(True)
         loss = torch.nn.functional.mse_loss(samples[..., self.root_slice], traj)
         loss_per_batch = torch.mean(torch.mean(torch.square(samples[..., self.root_slice] - traj), dim=-1), dim=-1)
-        return loss * (loss_per_batch.unsuqeeze(-1).unsqueeze(-1) / loss).detach()
+        self.normalizing_factor = (loss_per_batch.unsuqeeze(-1).unsqueeze(-1) / loss).detach()
+        return loss
+    
+    def batch_normalize_gradient(self, grad):
+        assert self.normalizing_factor is not None
+        grad *= self.normalizing_factor
+        self.normalizing_factor = None
+        return grad
 
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)

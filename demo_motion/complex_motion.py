@@ -26,7 +26,7 @@ from tqdm import tqdm
 def get_samples_NFEs(opt, shape):
     extra_args = {}
     NUM_TIMESTEPS = opt.NUM_TIMESTEPS
-    NFEs = torch.ones(samples.shape[0]) * NUM_TIMESTEPS
+    NFEs = torch.ones(shape[0]) * NUM_TIMESTEPS
     if opt.method == "dps":
         extra_args["weight"] = 0.1
         samples = opt.model.diffusion.dps_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
@@ -37,8 +37,8 @@ def get_samples_NFEs(opt, shape):
                                                  gr=extra_args["gr"])
     elif opt.method == "trust":
         extra_args["norm_upper_bound"] = opt.max_norm
-        extra_args["iterations_max"] = opt.J if opt.J is not None else 5
-        extra_args["gradient_norm"] = opt.gradient_norm if opt.gradient_norm is not None else 1
+        extra_args["iterations_max"] = opt.J if hasattr(opt, 'J') and opt.J is not None else 5
+        extra_args["gradient_norm"] = opt.gradient_norm if hasattr(opt, 'gradient_norm') and opt.gradient_norm is not None else 1
         extra_args["iteration_func"] = lambda time_next: 1  # 1
         opt.model.diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"],
                                                  norm_upper_bound=extra_args["norm_upper_bound"],
@@ -134,7 +134,7 @@ def main_high_jump(opt):
     heights = [0.6, 0.7, 0.8, 0.9, 1.0]
     constraint_violations = []
     NFEs = []
-    pred_noises = []
+    pred_noises = []   
     for j in range(len(heights)):
         render_name_j = os.path.join(opt.render_name, "height_" + str(heights[j]))
         motion_name_j = os.path.join(opt.motion_name, "height_" + str(heights[j]))
@@ -151,7 +151,7 @@ def main_high_jump(opt):
         opt.constraint = high_hand_constraint
 
         if opt.generate_motions:
-            samples, NFEs = get_samples_NFEs(opt, shape)
+            samples, sample_NFEs = get_samples_NFEs(opt, shape)
             just_render_simple(
                 opt.model.smpl,
                 samples[:5,...],
@@ -161,7 +161,7 @@ def main_high_jump(opt):
             if opt.save_motions:
                 for i in range(samples.shape[0]):
                     sample = samples[i].clone()
-                    sample_file = os.path.join(motion_name_j, str(i) + "_NFEs_" + str(NFEs[i].item()))
+                    sample_file = os.path.join(motion_name_j, str(i) + "_NFEs_" + str(sample_NFEs[i].item()))
                     torch.save(sample, sample_file)
 
         if opt.get_metrics:
@@ -411,7 +411,7 @@ if __name__ == "__main__":
     # Js = [8, 9, 10]
 
     opt.refine = False
-    opt.generate_motions = False
+    opt.generate_motions = True
     opt.get_metrics = True
     all_metrics = []
     metrics_cols = []
