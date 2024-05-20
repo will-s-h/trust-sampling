@@ -16,7 +16,7 @@ from constraints.SuperResolution import SuperResolutionConstraint
 from constraints.Inpaint import InpaintConstraint
 from constraints.GaussianDeblur import GaussianBlurConstraint
 from constraints.Sketch import FaceSketchConstraint
-from iteration_schedule import *
+from diffusion.iteration_schedule import *
 
 def load_yaml(file_path: str) -> dict:
     with open(file_path) as f:
