@@ -95,10 +95,10 @@ def calculate_diversity(activations):
 
 def test():
 
-    checkpoint = "./runs/motion/motion-encoder-267.pt"
-    dsg_path = "/move/u/yifengj/TML_diffusion_AMASS/data/may6/dsg200"
-    trust_path = "/move/u/yifengj/TML_diffusion_AMASS/data/may6/trust50"
-    gt_path = "/move/u/yifengj/TML_diffusion_AMASS/data/may6/AMASS_test_aggregated_sliced"
+    checkpoint = "/move/u/willsh/GitHub/trust-sampling/runs/motion/motion-encoder-267.pt"
+    dsg_path = "/move/u/willsh/GitHub/trust-sampling/demo_motion/motions/end_effector_foot_hand/dsg1000"
+    trust_path = "/move/u/willsh/GitHub/trust-sampling/demo_motion/motions/end_effector_foot_hand/trust200_999_StochasticLinearScheduler_0to8_0.5"
+    gt_path = "/move/u/willsh/GitHub/trust-sampling/data/AMASS_100"
 
     model = MotionEncoder(checkpoint, predict_contact=False, use_masks=False)
     model.eval()
@@ -137,48 +137,10 @@ def test():
     diversity_dsg = calculate_diversity(activations_dsg)
     diversity_trust = calculate_diversity(activations_trust)
 
-    print("Diversity DSG:", diversity_dsg)
-    print("Diversity Trust:", diversity_trust)
-    print("Diversity GT:", calculate_diversity(activations_gt))
-
-
-    # train_eval_dataset = MotionDataset(
-    #     data_path=opt.data_dir,
-    #     backup_path=None,
-    #     train=False,
-    #     force_reload=True,
-    #     horizon_trim=54,          # truncate to horizon if not already
-    # )
-    # ll = len(train_eval_dataset)
-    # print("len(train_dataset)", ll)
-
-    # # shuffle
-    # indices = np.random.permutation(ll)
-    # train_eval_dataset = torch.utils.data.Subset(train_eval_dataset, indices)
-
-    # train_eval_dataset_last_batch = train_eval_dataset[ll-num_samples:ll].to(model.accelerator.device)
-    # print("len(train_dataset_last_batch)", len(train_eval_dataset_last_batch))
-
-    # activations = model.encode(train_eval_dataset_last_batch)
-    # print("activations.shape", activations.shape)
-
-    # train_eval_dataset_2nd_last_batch = train_eval_dataset[ll-2*num_samples:ll-num_samples].to(model.accelerator.device)      # (num_samples, 60, 135)
-    # train_eval_dataset_2nd_last_batch = 0.8 * train_eval_dataset_2nd_last_batch + 0.2 * torch.randn_like(train_eval_dataset_2nd_last_batch)
-
-    # print("len(train_dataset_2nd_last_batch)", len(train_eval_dataset_2nd_last_batch))
-
-    # activations_2nd = model.encode(train_eval_dataset_2nd_last_batch)
-    # print("activations_2nd.shape", activations_2nd.shape)
-
-    # mu1, sigma1 = calculate_activation_statistics(activations)
-    # mu2, sigma2 = calculate_activation_statistics(activations_2nd)
-    # fid = calculate_fid((mu1, sigma1), (mu2, sigma2))
-    # print("FID:", fid)
-
-    # diversity = calculate_diversity(activations)
-    # print("Diversity:", diversity)
+    print("Diversity DSG:", diversity_dsg.item())
+    print("Diversity Trust:", diversity_trust.item())
+    print("Diversity GT:", calculate_diversity(activations_gt).item())
 
 
 if __name__ == "__main__":
-
     test()

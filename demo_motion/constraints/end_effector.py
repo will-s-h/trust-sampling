@@ -125,7 +125,6 @@ class EndEffectorConstraintFootHand:
             next_sample = func(samples)[1]
             loss_per_batch = -self.constraint(next_sample)
             loss = torch.mean(loss_per_batch)
-            print('loss', loss)
             return (torch.autograd.grad(loss, samples)[0] / loss * loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
             # return torch.autograd.grad(loss, samples)[0]
 

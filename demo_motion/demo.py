@@ -40,10 +40,8 @@ def main(opt):
         opt.constraint.set_smpl(model.smpl)
 
     motion_dir = os.path.join(opt.motion_save_dir, f"{opt.model_name}_{opt.constraint}/{opt.method}")
-    if not os.path.isdir(motion_dir): os.makedirs(motion_dir)
-    samples_file = os.path.join(motion_dir, "normal_samples_tom.pt")
 
-    NUM = 10
+    NUM = 1
     NUM_TIMESTEPS = 200
     print(f'Generating {NUM} normal sample{"" if NUM == 1 else "s"}...')
     shape = (NUM, model.horizon, model.repr_dim)
@@ -67,6 +65,8 @@ def main(opt):
 
     print(f'Finished generating trust samples.')
     if opt.save_motions:
+        if not os.path.isdir(motion_dir): os.makedirs(motion_dir)
+        samples_file = os.path.join(motion_dir, "normal_samples.pt")
         torch.save(samples, samples_file)
         print(f'Saved in {motion_dir}')
 
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     opt.motion_save_dir = "./motions"
     opt.render_dir = "renders/new"
     opt.save_motions = False
-    opt.no_render = True
+    opt.no_render = False
     opt.predict_contact = True
     opt.checkpoint = "../runs/motion/exp4-train-4950.pt"
     opt.model_name = "fixes_4950"
@@ -129,7 +129,6 @@ if __name__ == "__main__":
     # )
     # const.set_name("cartwheel_please")
     
-    opt.constraint = const
     for method in ["dps", "dsg", "trust"][2:]:
         opt.method = method
         main(opt)

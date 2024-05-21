@@ -5,16 +5,29 @@ import random
 
 class LinearScheduler:
     def __init__(self, start=1, end=5, steps=1000):
-        self.steps = steps
         self.start, self.end = start, end
-        self.maxes = np.clip(np.round(np.linspace(end+0.5, start-0.5, steps)), start, end)
+        self.maxes = np.clip(np.round(np.linspace(end+0.5, start-0.5, 1000)), start, end)
 
     def __call__(self, time):
-        assert time >= 0 and time < self.steps
         return self.maxes[time]
     
     def __str__(self):
         return f"LinearSchedule_{self.start}to{self.end}"
+    
+class StochasticLinearScheduler:
+    def __init__(self, start=0, end=8):
+        self.start, self.end = start, end
+        self.maxes = np.linspace(end, start, 1000)
+    
+    def _random_round(val):
+        low = int(val)
+        return low if (low + random.random() < val) else low + 1
+    
+    def __call__(self, time):
+        return StochasticLinearScheduler._random_round(self.maxes[time])
+
+    def __str__(self):
+        return f"StochasticLinearScheduler_{self.start}to{self.end}"
 
 class InverseScheduler:
     def __init__(self, betas=None, total_steps=1000, ddim_steps=200, nfes=1000):
@@ -43,7 +56,7 @@ class InverseNormScheduler:
         self.J_scheduler = J_scheduler
 
     def __call__(self, time):
-        return self.base_norm / (self.J_scheduler.maxes[time] ** 0.5)
+        return self.base_norm / max(1, self.J_scheduler.maxes[time] ** 0.5)
 
     def __str__(self):
         return f"InverseNormScheduler{self.base_norm}"

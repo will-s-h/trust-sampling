@@ -9,7 +9,7 @@ import torch
 
 device = 'cuda:0'
 label_root = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/ffhq256-100')
-normal_recon_root = Path(f'/move/u/willsh/GitHub/trust-sampling/demo_image/experiments/SuperResolution_ablation2/ffhq_trust_(999.0,4,1.0)')
+normal_recon_root = Path(f'/move/u/willsh/GitHub/trust-sampling/demo_image/test/GaussianBlur/ffhq_trust_(999.0,LinearSchedule_1to4,1)')
 files1 = sorted([file for file in label_root.iterdir() if file.is_file()])
 files2 = sorted([file for file in normal_recon_root.iterdir() if file.is_file()])
 
