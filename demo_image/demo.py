@@ -49,7 +49,7 @@ def main(args):
     model_config = load_yaml("./ffhq_model_config.yaml" if args.model == "ffhq" else "./imagenet_model_config.yaml")
     model = create_model(**model_config).to('cuda')
 
-    all_paths = all_image_paths(args.dataset_path)[:4]
+    all_paths = all_image_paths(args.dataset_path)
     batch_size = 1
     if args.constraint == "inpaint":
         masks = torch.load('../dataset/masks.pt')
@@ -60,6 +60,8 @@ def main(args):
         args.iterations_max = InverseScheduler(ddim_steps=200, nfes=1000)
     elif args.iterations_max == 'LinearScheduler':
         args.iterations_max = LinearScheduler(1, 8, 1000)
+    elif args.iterations_max == 'LinearScheduler500':
+        args.iterations_max = LinearScheduler(1, 4, 1000)
     
     if args.gradient_norm == 'InverseNormScheduler':
         args.gradient_norm = InverseNormScheduler(args.iterations_max)
