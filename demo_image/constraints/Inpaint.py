@@ -40,11 +40,12 @@ class InpaintConstraint():
     
     def get_mask(self, samples):
         if self.mask.shape == samples.shape: return self.mask
-        if self.mask.dim() == samples.dim(): raise ValueError("Can't provide 4D mask and non-matching 4D samples")
+        # if self.mask.dim() == samples.dim(): raise ValueError("Can't provide 4D mask and non-matching 4D samples")
         return self.mask.expand((samples.shape[0],) + self.mask.shape)
     
     def constraint(self, samples):
-        assert self.ref_image.dim() == samples.dim() - 1 or self.ref_image.shape[0] == samples.shape[0]
+        # print(self.ref_image.shape, samples.shape)
+        # assert self.ref_image.dim() == samples.dim() - 1 or self.ref_image.shape[0] == samples.shape[0]
         difference = (samples - self.ref_image) * self.get_mask(samples)
         loss = torch.norm(difference)
         return loss

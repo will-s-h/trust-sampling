@@ -62,10 +62,22 @@ def main(args):
         args.iterations_max = LinearScheduler(1, 8, 1000)
     elif args.iterations_max == 'LinearScheduler500':
         args.iterations_max = LinearScheduler(1, 4, 1000)
+    elif args.iterations_max == 'StochasticLinearScheduler':
+        args.iterations_max = StochasticLinearScheduler(0, 8)
+    elif args.iterations_max == 'StochasticLinearScheduler_Other':
+        args.iterations_max = StochasticLinearScheduler(2, 6)
+    elif args.iterations_max == 'StochasticLinearScheduler500':
+        args.iterations_max = StochasticLinearScheduler(0, 4)
+    elif args.iterations_max == 'StochasticLinearScheduler500_Other':
+        args.iterations_max = StochasticLinearScheduler(1, 3)
+    elif args.iterations_max == 'SLS_0_3':
+        args.iterations_max = StochasticLinearScheduler(0, 3)
+    elif isinstance(args.iterations_max, str):
+        args.iterations_max = int(args.iterations_max)
     
     if args.gradient_norm == 'InverseNormScheduler':
         args.gradient_norm = InverseNormScheduler(args.iterations_max)
-    else:
+    elif isinstance(args.gradient_norm, str):
         args.gradient_norm = int(args.gradient_norm)
     
     for j in range(len(all_paths) // batch_size):
@@ -81,18 +93,22 @@ def main(args):
         elif args.constraint == "face_sketch":
             const = FaceSketchConstraint(paths)
             
-        SAMPLE_STEPS = 200
+        SAMPLE_STEPS = 1000
         NUM_SAMPLES = len(paths)
         SHAPE = (NUM_SAMPLES, 3, 256, 256)
         diffusion = GaussianDiffusion(model, schedule="linear", n_timestep=1000, predict_epsilon=True, clip_denoised=True, learned_variance=True).to('cuda')
         extra_args = {}
         
         if args.method == "dps":
-            extra_args["weight"] = 0.3
+            extra_args["weight"] = 1.0
             samples = diffusion.dps_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, weight=extra_args["weight"])
         elif args.method == "dsg":
             extra_args["gr"] = 0.1
             samples = diffusion.dsg_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, gr=extra_args["gr"])
+        elif args.method == "lgdmc":
+            extra_args["weight"] = 1.0
+            extra_args["n"] = 10
+            samples = diffusion.lgdmc_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, weight=extra_args["weight"], n=extra_args["n"])
         elif args.method == "trust":
             extra_args["norm_upper_bound"] = args.norm_upper_bound
             extra_args["iterations_max"] = args.iterations_max
@@ -103,7 +119,7 @@ def main(args):
             avg_nfes += torch.mean(nfes).item() / (len(all_paths) // batch_size)
 
         # plot all experiments
-        save_dir = f"test/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
+        save_dir = f"new_ablation/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
         if not os.path.exists(save_dir): os.makedirs(save_dir)
 
         for i, sample in enumerate(samples):
@@ -113,7 +129,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", type=str, default="trust")
+    parser.add_argument("--method", type=str, default="dps")
     parser.add_argument("--model", type=str, default="ffhq")
     parser.add_argument("--constraint", type=str, default="inpaint")
     parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")

@@ -31,6 +31,13 @@ def get_samples_NFEs(opt, shape):
         extra_args["gr"] = 0.1
         samples = opt.model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
                                                  gr=extra_args["gr"])
+    
+    elif opt.method == "lgdmc":
+        extra_args["weight"] = 1.0
+        extra_args["n"] = 10
+        samples = opt.model.diffusion.lgdmc_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint,
+                                                   weight=extra_args["weight"], n=extra_args["n"])
+    
     elif opt.method == "trust":
         extra_args["norm_upper_bound"] = opt.max_norm
         extra_args["iterations_max"] = opt.J if hasattr(opt, 'J') and opt.J is not None else 5
@@ -157,7 +164,7 @@ if __name__ == "__main__":
     # GENERAL SETTINGS
     opt = parse_test_opt()
     opt.save_motions = True
-    opt.no_render = True
+    opt.no_render = False
     opt.predict_contact = True
     opt.checkpoint = "../runs/motion/exp4-train-4950.pt"
     opt.model_name = "fixes_4950"
@@ -190,7 +197,8 @@ if __name__ == "__main__":
 
     for i, NUM_TIMESTEP in enumerate(NUM_TIMESTEPS):
         opt.NUM_TIMESTEPS = NUM_TIMESTEP
-        for method in ["dps", "dsg", "trust"][2:]:
+        for method in ["dps", "dsg", "lgdmc", "trust"][2:3]:
+            print(f'method: {method}')
             if method == 'trust' and NUM_TIMESTEP < 201:
                 for max_norm in max_norms[i]:
                     opt.max_norm = max_norm

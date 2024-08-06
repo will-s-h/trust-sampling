@@ -127,6 +127,33 @@ class EndEffectorConstraintFootHand:
             loss = torch.mean(loss_per_batch)
             return (torch.autograd.grad(loss, samples)[0] / loss * loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
             # return torch.autograd.grad(loss, samples)[0]
+    
+    def lgdmc_gradient(self, samples, func=None, n=10, sigma=0):
+        device = samples.device
+        assert samples.dim() == 3 and samples.shape[1:] == self.shape
+        assert func is not None
+        if sigma == 0:
+            print("Warning: sigma = 0 in lgdmc_gradient is equivalent to a slower version of DPS!")
+        
+        old_targets = self.targets
+        self.targets = self.targets.repeat_interleave(n, dim=0)
+        
+        with torch.enable_grad():
+            samples.requires_grad_(True)        # of shape [m, 60, 139]
+            next_sample = func(samples)[1]      # of shape [m, 60, 139]
+            coef = sigma / torch.sqrt(1 + sigma ** 2)
+            next_sample_n = next_sample.repeat_interleave(n, dim=0) + coef * torch.randn((n * samples.shape[0],) + self.shape, device=device)
+            # should be of shape [m*n, 60, 139]
+            
+            loss_per_batch = -self.constraint(next_sample_n)  # should be of shape [m * n]
+            loss_per_batch_view = loss_per_batch.view(-1, n) + torch.log(torch.tensor(1/n, device=device)) # should be of shape [m, n]
+            combined_loss_per_batch = torch.logsumexp(loss_per_batch_view, dim=1) # should be of shape [m]
+            loss = torch.mean(combined_loss_per_batch)
+        
+        self.targets = old_targets
+        
+        return (torch.autograd.grad(loss, samples)[0] / loss * combined_loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
+            
 
     def plot(self, fig, ax):
         xs = [point[2].item() for point in self.points]

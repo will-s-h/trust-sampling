@@ -55,6 +55,11 @@ def main(opt):
         NUM_TIMESTEPS = 250
         extra_args["gr"] = 0.1
         samples = model.diffusion.dsg_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, gr=extra_args["gr"])
+    elif opt.method == "lgdmc":
+        NUM_TIMESTEPS = 250
+        extra_args["weight"] = 0.1
+        extra_args["n"] = 10
+        samples = model.diffusion.lgdmc_sample(shape, sample_steps=NUM_TIMESTEPS, constraint_obj=opt.constraint, weight=extra_args["weight"], n=extra_args["n"])
     elif opt.method == "trust":
         extra_args["norm_upper_bound"] = 80
         extra_args["iterations_max"] = 5
@@ -91,8 +96,8 @@ if __name__ == "__main__":
     opt.checkpoint = "../runs/motion/exp4-train-4950.pt"
     opt.model_name = "fixes_4950"
     
-    x_traj = torch.cat((torch.linspace(X_START, 0.2, 30), torch.linspace(0.2, 0.2, 30)))
-    y_traj = torch.cat((torch.linspace(Y_START, Y_START, 30), torch.linspace(Y_START, 0.3, 30)))
+    x_traj = torch.cat((torch.linspace(X_START, 2.0, 30), torch.linspace(2.0, 2.0, 30)))
+    y_traj = torch.cat((torch.linspace(Y_START, Y_START, 30), torch.linspace(Y_START, 2.0, 30)))
     traj = torch.stack((x_traj, y_traj)).T
     const = TrajectoryConstraint(traj=traj)
     const.set_name("Lshape")
@@ -129,6 +134,6 @@ if __name__ == "__main__":
     # )
     # const.set_name("cartwheel_please")
     
-    for method in ["dps", "dsg", "trust"][2:]:
+    for method in ["dps", "dsg", "trust", "lgdmc"][2:]:
         opt.method = method
         main(opt)
