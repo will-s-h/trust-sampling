@@ -62,11 +62,34 @@ class TrajectoryConstraint3D:
                                          dim=-1)  # have a loss for each sample in the batch
 
             return (torch.autograd.grad(loss, samples)[0] / loss * loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
-            # grad = []
-            # for j in range(loss.shape[0]):
-            #     grad.append(torch.autograd.grad(loss[j], samples, retain_graph=True)[0][j,...])
-            # return torch.stack(grad)
+    
+    def lgdmc_gradient(self, samples, func=None, n=10, sigma=0):
+        device = samples.device
+        assert samples.dim() == 3
+        assert func is not None
+        
+        traj = self.traj.repeat_interleave(n, dim=0)  #[m * n, 60, 3]
+        
+        if sigma == 0:
+            print("Warning: sigma = 0 in lgdmc_gradient is equivalent to a slower version of DPS!")
+        
+        with torch.enable_grad():
+            traj.requires_grad_(True)       # of shape [m, 60, 3]
+            samples.requires_grad_(True)    # of shape [m, 60, 139]
+            next_sample = func(samples)[1]
+            coef = sigma / torch.sqrt(1 + sigma ** 2)
+            next_sample_n = next_sample.repeat_interleave(n, dim=0) + coef * torch.randn((n * samples.shape[0],) + samples.shape[1:], device=device)
+            # should be of shape [m*n, 60, 139]
+            
+            loss_per_entry = -torch.nn.functional.mse_loss(next_sample_n[..., self.root_slice], traj, reduction='none')  # [m*n, 60, 139]
+            loss_per_batch = torch.mean(loss_per_entry, dim=[i for i in range(1, loss_per_entry.dim())]) # [m * n]
+            loss_per_batch_view = loss_per_batch.view(-1, n) + torch.log(torch.tensor(1/n, device=device)) # should be of shape [m, n]
+            combined_loss_per_batch = torch.logsumexp(loss_per_batch_view, dim=1) # should be of shape [m]
+            loss = torch.mean(combined_loss_per_batch)
 
+        return (torch.autograd.grad(loss, samples)[0] / loss * combined_loss_per_batch.unsqueeze(-1).unsqueeze(-1)).detach()
+
+    
     def plot(self, fig, ax):
         # first, normalize traj
         assert self.normalizer is not None, "must have initialized a normalizer via set_normalizer()"

@@ -330,6 +330,49 @@ class GaussianDiffusion(nn.Module):
             
         return intermediates if save_intermediates else x
     
+    def lgdmc_sample(self, shape, sample_steps=50, constraint_obj=None, weight=1, n=10, **kwargs):
+        assert hasattr(constraint_obj, "lgdmc_gradient"), "constraint requires special 'lgdmc_gradient' function for lgdmc sampling!"
+        
+        batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
+
+        times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
+        times = list(reversed(times.int().tolist()))
+        time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+
+        x = torch.randn(shape, device = device)
+        x_start = None
+
+        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+            # produce a bunch of times, for each of the samples in the batch
+            time_cond = torch.full((batch,), time, device=device)
+            
+            # predict completely denoised product
+            pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
+            
+            if time_next < 0:
+                x = x_start.detach()
+                continue
+            
+            # apply diffusion noise again, except with one less step of noise than what was denoised.
+            alpha = self.alphas_cumprod[time]
+            alpha_next = self.alphas_cumprod[time_next]
+
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c = (1 - alpha_next - sigma ** 2).sqrt()
+
+            noise = torch.randn_like(x)
+            x = x_start.detach() * alpha_next.sqrt() + \
+                  c * pred_noise.detach() + \
+                  sigma * noise
+                  
+            # LGD-MC gradient correction:
+            g = constraint_obj.lgdmc_gradient(x_start, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised), n=n, sigma=sigma)
+            norms = torch.norm(g.reshape(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
+            g *= weight / norms
+            x += g  # note that the negative sign is included in the .gradient function, in our formulation
+            
+        return x
+    
     def set_trust_parameters(self, iteration_func = None, norm_upper_bound = None, iterations_max = 1, gradient_norm = 1, refine = True):
         self.iteration_func = iteration_func if iteration_func is not None else (lambda x: 1)
         self.norm_upper_bound = norm_upper_bound if norm_upper_bound is not None else self.get_norm_upper_bound()

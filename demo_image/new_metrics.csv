@@ -1,0 +1,5 @@
+,exp,fid,psnr,lpips
+0,"GaussianBlur ffhq_trust_(999.0,StochasticLinearScheduler_0to3,1)",56.56584719856704,27.393079679974953,0.1954706744849682
+1,"Inpaint ffhq_trust_(999.0,StochasticLinearScheduler_0to3,1)",48.851394438833665,21.47301697166993,0.18648211658000946
+2,"Inpaint ffhq_trust_(442.0,StochasticLinearScheduler_0to4,1)",41.2011085939115,21.323232930393306,0.17079888008534908
+3,"SuperResolution ffhq_trust_(999.0,StochasticLinearScheduler_0to3,1)",42.3080397035896,28.588558092263867,0.15953838482499122

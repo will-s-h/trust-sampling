@@ -1,0 +1,2 @@
+exp_name,method,ddim steps,f_eval,max_norm,constraint mean,constraint std,constraint 95perc,norm_pred_noise,norm_pred_noise_std,norm_pred_noise_95perc,norm_pred_noise_5perc
+end_effector_foot_handlgdmc200,lgdmc,200,200,80,0.15555318,0.0798367,0.29257571548223493,2.3782526016235352,0.6116853713989258,3.5848344421386713,1.6362856674194337
