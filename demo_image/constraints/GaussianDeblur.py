@@ -6,7 +6,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 
 class GaussianBlurConstraint():
-    def __init__(self, reference_image, kernel_size, intensity, device='cuda'):
+    def __init__(self, reference_image, kernel_size, intensity, device='cuda', noise=0):
         self.device = device
         self.kernel_size = kernel_size
         self.conv = Blurkernel(kernel_size=kernel_size,
@@ -16,9 +16,11 @@ class GaussianBlurConstraint():
         self.conv.update_weights(self.kernel.type(torch.float32))
         self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         self.ref_image = self._format_image(reference_image)
+        self.noise_string = "" if noise == 0 else f"_{noise}"
+        self.fixed_noise = 0 if noise == 0 else noise * torch.randn_like(self.ref_image)
         
     def __str__(self):
-        return "GaussianBlur"
+        return "GaussianBlur" + self.noise_string
     
     def _format_image(self, ref_image):
         if isinstance(ref_image, list):
@@ -44,7 +46,7 @@ class GaussianBlurConstraint():
 
     def constraint(self, samples):
         blurred = self.conv(samples)
-        difference = blurred - self.ref_image
+        difference = blurred - (self.ref_image + self.fixed_noise)
         loss = torch.norm(difference)
         return loss
 

@@ -84,14 +84,12 @@ def main(args):
         paths = all_paths[j * batch_size : (j+1) * batch_size]
         
         if args.constraint == "super_resolution":
-            const = SuperResolutionConstraint(paths, scale_factor=4)
+            const = SuperResolutionConstraint(paths, scale_factor=4, noise=args.gaussian_noise)
         elif args.constraint == "inpaint":
             mask = masks[j * batch_size : (j+1) * batch_size].squeeze(1)
-            const = InpaintConstraint(paths, mask=mask)
+            const = InpaintConstraint(paths, mask=mask, noise=args.gaussian_noise)
         elif args.constraint == "gaussian_deblur":
-            const = GaussianBlurConstraint(paths, 61, 3.0)
-        elif args.constraint == "face_sketch":
-            const = FaceSketchConstraint(paths)
+            const = GaussianBlurConstraint(paths, 61, 3.0, noise=args.gaussian_noise)
             
         SAMPLE_STEPS = 1000
         NUM_SAMPLES = len(paths)
@@ -103,8 +101,9 @@ def main(args):
             extra_args["weight"] = 1.0
             samples = diffusion.dps_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, weight=extra_args["weight"])
         elif args.method == "dsg":
-            extra_args["gr"] = 0.1
-            samples = diffusion.dsg_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, gr=extra_args["gr"])
+            extra_args["gr"] = 0.3
+            extra_args["interval"] = 10
+            samples = diffusion.dsg_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, gr=extra_args["gr"], interval=extra_args["interval"])
         elif args.method == "lgdmc":
             extra_args["weight"] = 1.0
             extra_args["n"] = 10
@@ -119,23 +118,29 @@ def main(args):
             avg_nfes += torch.mean(nfes).item() / (len(all_paths) // batch_size)
 
         # plot all experiments
-        save_dir = f"new_ablation/{const}/{args.dataset_name}_{args.method}_({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
+        
+        save_dir = f"{args.save_dir}/{const}/{args.dataset_name}_{args.method}"
+        if args.method == "trust":
+            save_dir += f"({args.norm_upper_bound},{args.iterations_max},{args.gradient_norm})"
         if not os.path.exists(save_dir): os.makedirs(save_dir)
 
         for i, sample in enumerate(samples):
             plt.imsave(f'{save_dir}/result{j*batch_size + i:05}.png', clear_color(sample))
     
-    print(f'average NFEs: {avg_nfes}')
+    if args.method == "trust":
+        print(f'average NFEs: {avg_nfes}')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", type=str, default="dps")
+    parser.add_argument("--method", type=str, default="dsg")
     parser.add_argument("--model", type=str, default="ffhq")
-    parser.add_argument("--constraint", type=str, default="inpaint")
-    parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-100")
+    parser.add_argument("--constraint", type=str, default="super_resolution")
+    parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-10")
     parser.add_argument("--dataset_name", type=str, default="ffhq")
     parser.add_argument("--norm_upper_bound", type=float, default=999)
     parser.add_argument("--iterations_max", default=4)
     parser.add_argument("--gradient_norm", default=1)
+    parser.add_argument("--gaussian_noise", default=0)
+    parser.add_argument("--save_dir", default='./results')
     args = parser.parse_args()
     main(args)
