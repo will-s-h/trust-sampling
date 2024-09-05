@@ -57,15 +57,21 @@ if __name__ == '__main__':
     single = True
 
     if single:
-        label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/imagenet-100')
-        plots = Path(f'/move/u/willsh/GitHub/diffusion-posterior-sampling/lgdmc_imagenet_100/gaussian_blur/recon')
+        label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/ffhq256-10')
+        plots = Path(f'/move/u/willsh/GitHub/trust-sampling/demo_image/results/SuperResolution/ffhq_dsg')
+        
+        num_files_label = len([f for f in label.iterdir() if f.is_file()])
+        num_files_plots = len([f for f in plots.iterdir() if f.is_file()])
+        if num_files_label != num_files_plots:
+            print(f"Warning: unequal number of files, there are {num_files_label} in the label path and {num_files_plots} in the plots path!")
+        
         calculate_metrics(label, plots)
         exit()
     
     
     imagenet_label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/imagenet-100')
     ffhq_label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/ffhq256-100')
-    plot_root = Path(f'/move/u/willsh/GitHub/trust-sampling/demo_image/newplots')
+    plot_root = Path(f'/move/u/willsh/GitHub/trust-sampling/demo_image/old plots/experiments')
     
     data = {
         'exp': [],

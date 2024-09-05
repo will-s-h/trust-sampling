@@ -4,14 +4,16 @@ import torchvision.transforms as transforms
 from PIL import Image
 
 class InpaintConstraint():
-    def __init__(self, reference_image, mask, device = 'cuda'):
+    def __init__(self, reference_image, mask, device = 'cuda', noise=0):
         self.device = device
         self.mask = mask
         self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         self.ref_image = self._format_image(reference_image)
+        self.noise_string = "" if noise == 0 else f"_{noise}"
+        self.fixed_noise = 0 if noise == 0 else noise * torch.randn_like(self.ref_image)
     
     def __str__(self):
-        return "Inpaint"
+        return "Inpaint" + self.noise_string
     
     def _format_image(self, ref_image):
         if isinstance(ref_image, list):
@@ -46,7 +48,7 @@ class InpaintConstraint():
     def constraint(self, samples):
         # print(self.ref_image.shape, samples.shape)
         # assert self.ref_image.dim() == samples.dim() - 1 or self.ref_image.shape[0] == samples.shape[0]
-        difference = (samples - self.ref_image) * self.get_mask(samples)
+        difference = (samples - (self.ref_image + self.fixed_noise)) * self.get_mask(samples)
         loss = torch.norm(difference)
         return loss
     

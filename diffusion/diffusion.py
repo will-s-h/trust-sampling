@@ -172,6 +172,7 @@ class GaussianDiffusion(nn.Module):
             pred_noise = model_output
             x_start = self.predict_start_from_noise(x, t, pred_noise)
             x_start = maybe_clip(x_start)
+            pred_noise = self.predict_noise_from_start(x, t, x_start)   # recent change! added to match DPS repo.
         else:
             x_start = model_output
             x_start = maybe_clip(x_start)
@@ -188,12 +189,12 @@ class GaussianDiffusion(nn.Module):
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
-        x = torch.randn(shape, device = device)
+        x = torch.randn(shape, device=device)
         x_start = None
         intermediates = []
         if save_intermediates: intermediates.append(x)
-
-        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+        pbar = tqdm(time_pairs, desc = 'sampling loop time step')
+        for time, time_next in pbar:
             # produce a bunch of times, for each of the samples in the batch
             time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
             # predict completely denoised product
@@ -215,18 +216,12 @@ class GaussianDiffusion(nn.Module):
             sigma_one = eta * ((1 - alpha / alpha_one) * (1 - alpha_one) / (1 - alpha)).sqrt()
 
             noise = torch.randn_like(x)
-            # model_mean = x_start * alpha_next.sqrt() + c * pred_noise
-            # new_pred_noise, *_ = self.model_predictions(model_mean, time_cond, clip_x_start=self.clip_denoised)
-            # norm_noise = torch.norm(new_pred_noise, dim=(-2, -1)).cpu()
-            # print(norm_noise)
             x = x_start * alpha_next.sqrt() + \
                   c * pred_noise + \
                   sigma * noise #(sigma / sigma_one) * torch.exp(0.5 * pred_log_var) * noise if self.learned_variance else sigma * noise
             
             if save_intermediates: intermediates.append(x)
-                  
-            new_pred_noise, *_ = self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised)
-            print(f'reached norm: {torch.norm(new_pred_noise).item()}')
+            
         return intermediates if save_intermediates else x
     
     def _get_trajectory(self, x):
@@ -253,7 +248,9 @@ class GaussianDiffusion(nn.Module):
             time_cond = torch.full((batch,), time, device=device)
             
             # predict completely denoised product
-            pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
+            with torch.enable_grad():
+                x = x.detach().requires_grad_(True)
+                pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
             
             if time_next < 0:
                 x = x_start.detach()
@@ -267,64 +264,78 @@ class GaussianDiffusion(nn.Module):
             c = (1 - alpha_next - sigma ** 2).sqrt()
 
             noise = torch.randn_like(x)
-            x = x_start.detach() * alpha_next.sqrt() + \
+            x_next = x_start.detach() * alpha_next.sqrt() + \
                   c * pred_noise.detach() + \
                   sigma * noise
                   
             # DPS gradient correction:
-            g = constraint_obj.gradient(x_start, lambda x_t: self.model_predictions(x_t, time_cond, clip_x_start=self.clip_denoised))
-            norms = torch.norm(g.reshape(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
-            g *= weight / norms
-            x += g  # note that the negative sign is included in the .gradient function, in our formulation
+            with torch.enable_grad():
+                loss = -constraint_obj.constraint(x_start)
+                g = torch.autograd.grad(loss, x)[0]
             
-            if save_intermediates: intermediates.append(x)
+            # g = constraint_obj.gradient(x_start, lambda x_t: self.model_predictions(x_t, time_cond, clip_x_start=self.clip_denoised))
+            #norms = torch.norm(g.reshape(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
+            g *= weight #/ norms
+            x_next += g  # note that the negative sign is included in the .gradient function, in our formulation
+            x = x_next.detach()
             
+            if save_intermediates: intermediates.append()
+
         return intermediates if save_intermediates else x
     
     @torch.no_grad()  # in paper, gr=0.1 or 0.2
-    def dsg_sample(self, shape, sample_steps=50, constraint_obj=None, gr=0.1, save_intermediates=False, **kwargs):
+    def dsg_sample(self, shape, sample_steps=50, constraint_obj=None, gr=0.1, interval=10, save_intermediates=False, **kwargs):
         batch, device, total_timesteps, sampling_timesteps, eta = shape[0], self.betas.device, self.n_timestep, sample_steps, 1
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
-        time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+        time_pairs = list(zip(range(len(times)-1), times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
         x = torch.randn(shape, device = device)
         x_start = None
         intermediates = []
         if save_intermediates: intermediates.append(x)
 
-        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+        for i, time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
             # produce a bunch of times, for each of the samples in the batch
             time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
             
             # predict completely denoised product
-            pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
+            with torch.enable_grad():
+                x = x.detach().requires_grad_(True)
+                pred_noise, x_start, *_ = self.model_predictions(x, time_cond, clip_x_start = self.clip_denoised)
 
             if time_next < 0:
-                x = x_start
+                x = x_start.detach()
                 continue
             
             # apply diffusion noise again, except with one less step of noise than what was denoised.
             alpha = self.alphas_cumprod[time]
             alpha_next = self.alphas_cumprod[time_next]
-
             sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
             c = (1 - alpha_next - sigma ** 2).sqrt()
-
             noise = torch.randn_like(x)
 
             x_next_mean = x_start * alpha_next.sqrt() + c * pred_noise
-            x = x_next_mean + sigma * noise
+            x_next = x_next_mean + sigma * noise
                   
             # DSG sizing of gradient: sqrt(n) * sigma_t
-            g = constraint_obj.gradient(x_start, lambda x: self.model_predictions(x, time_cond, clip_x_start=self.clip_denoised))
-            norms = torch.norm(g.view(g.shape[0], -1), dim=1).view((g.shape[0],) + tuple([1 for _ in range(len(g.shape[1:]))])).expand(g.shape) + 1e-6  #avoid div by 0
-            g *= sigma * x.numel() ** 0.5 / norms
-            x_mod = x_start*alpha_next.sqrt() + c*pred_noise + g  # note that g already has - sign within it
+            with torch.enable_grad():
+                loss = -constraint_obj.constraint(x_start)
+                g = torch.autograd.grad(loss, x)[0]
             
-            # weighted average between xmod and x for diversity
-            x = x + gr*(x_mod - x)
+            if i % interval == 0:
+                b = x.shape[0]
+                r = torch.sqrt(torch.tensor(x.numel() / b, device=device)) * sigma
+                norms = torch.norm(g.view(g.shape[0], -1), dim=1).view((g.shape[0],) + (1,) * (len(g.shape)-1)).expand(g.shape) + 1e-8  #avoid div by 0
+                d_star = r * g / norms
+                d_sample = x_next - x_next_mean
+                mix_direction = d_sample + gr * (d_star - d_sample)
+                mix_direction_norm = torch.norm(mix_direction.view(g.shape[0], -1), dim=1).view((g.shape[0],) + (1,) * (len(g.shape)-1)).expand(g.shape) + 1e-8
+                mix_step = r * mix_direction / mix_direction_norm
+                x = x_next_mean + mix_step
+            else:
+                x = x_next
             
             if save_intermediates: intermediates.append(x)
             

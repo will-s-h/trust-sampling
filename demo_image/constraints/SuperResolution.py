@@ -9,14 +9,16 @@ import torchvision.transforms as transforms
 from PIL import Image
 
 class SuperResolutionConstraint():
-    def __init__(self, reference_image, scale_factor, device = 'cuda'):
+    def __init__(self, reference_image, scale_factor, device = 'cuda', noise=0):
         self.device = device
         self.down_sample = Resizer((1, 3, 256, 256), 1/scale_factor).to(device)
         self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         self.ref_image = self._format_image(reference_image)
+        self.noise_string = "" if noise == 0 else f"_{noise}"
+        self.fixed_noise = 0 if noise == 0 else noise * torch.randn_like(self.ref_image)
     
     def __str__(self):
-        return "SuperResolution"
+        return "SuperResolution" + self.noise_string
     
     def _format_image(self, ref_image):
         if isinstance(ref_image, list):
@@ -47,7 +49,7 @@ class SuperResolutionConstraint():
     def constraint(self, samples):
         assert self.ref_image.dim() == samples.dim() - 1 or self.ref_image.shape[0] == samples.shape[0]
         smaller = self.down_sample(samples)
-        difference = smaller - self.ref_image
+        difference = smaller - (self.ref_image + self.fixed_noise)
         loss = torch.norm(difference)
         return loss
     
