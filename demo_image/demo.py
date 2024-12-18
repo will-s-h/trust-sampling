@@ -91,30 +91,34 @@ def main(args):
         elif args.constraint == "gaussian_deblur":
             const = GaussianBlurConstraint(paths, 61, 3.0, noise=args.gaussian_noise)
             
-        SAMPLE_STEPS = 1000
+        
         NUM_SAMPLES = len(paths)
         SHAPE = (NUM_SAMPLES, 3, 256, 256)
         diffusion = GaussianDiffusion(model, schedule="linear", n_timestep=1000, predict_epsilon=True, clip_denoised=True, learned_variance=True).to('cuda')
         extra_args = {}
         
         if args.method == "dps":
+            SAMPLE_STEPS = 1000
             extra_args["weight"] = 1.0
             samples = diffusion.dps_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, weight=extra_args["weight"])
         elif args.method == "dsg":
-            extra_args["gr"] = 0.3
-            extra_args["interval"] = 10
+            SAMPLE_STEPS = 1000
+            extra_args["gr"] = 0.2
+            extra_args["interval"] = 20
             samples = diffusion.dsg_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, gr=extra_args["gr"], interval=extra_args["interval"])
         elif args.method == "lgdmc":
+            SAMPLE_STEPS = 1000
             extra_args["weight"] = 1.0
             extra_args["n"] = 10
             samples = diffusion.lgdmc_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, weight=extra_args["weight"], n=extra_args["n"])
         elif args.method == "trust":
+            SAMPLE_STEPS = 200
             extra_args["norm_upper_bound"] = args.norm_upper_bound
             extra_args["iterations_max"] = args.iterations_max
             extra_args["gradient_norm"] = args.gradient_norm
             extra_args["iteration_func"] = lambda time_next: 1 # 1
             diffusion.set_trust_parameters(iteration_func=extra_args["iteration_func"], norm_upper_bound=extra_args["norm_upper_bound"], iterations_max=extra_args["iterations_max"], gradient_norm=extra_args["gradient_norm"])
-            samples, nfes = diffusion.trust_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, debug=True)
+            samples, nfes = diffusion.edited_trust_sample(SHAPE, sample_steps=SAMPLE_STEPS, constraint_obj=const, debug=True)
             avg_nfes += torch.mean(nfes).item() / (len(all_paths) // batch_size)
 
         # plot all experiments
@@ -137,7 +141,7 @@ if __name__ == "__main__":
     parser.add_argument("--constraint", type=str, default="super_resolution")
     parser.add_argument("--dataset_path", type=str, default="../dataset/ffhq256-10")
     parser.add_argument("--dataset_name", type=str, default="ffhq")
-    parser.add_argument("--norm_upper_bound", type=float, default=999)
+    parser.add_argument("--norm_upper_bound", type=float, default=440)
     parser.add_argument("--iterations_max", default=4)
     parser.add_argument("--gradient_norm", default=1)
     parser.add_argument("--gaussian_noise", default=0)

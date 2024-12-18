@@ -57,8 +57,8 @@ if __name__ == '__main__':
     single = True
 
     if single:
-        label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/ffhq256-10')
-        plots = Path(f'/move/u/willsh/GitHub/trust-sampling/demo_image/results/SuperResolution/ffhq_dsg')
+        label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/imagenet-100')
+        plots = Path(f'/move/u/willsh/GitHub/trust-sampling/all_results/Inpaint/imagenet_lgdmc10')
         
         num_files_label = len([f for f in label.iterdir() if f.is_file()])
         num_files_plots = len([f for f in plots.iterdir() if f.is_file()])
@@ -70,8 +70,8 @@ if __name__ == '__main__':
     
     
     imagenet_label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/imagenet-100')
-    ffhq_label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/ffhq256-100')
-    plot_root = Path(f'/move/u/willsh/GitHub/trust-sampling/demo_image/old plots/experiments')
+    ffhq_label = Path(f'/move/u/willsh/GitHub/trust-sampling/dataset/ffhq256-1000')
+    plot_root = Path(f'/move/u/willsh/GitHub/trust-sampling/all_results')
     
     data = {
         'exp': [],
@@ -86,7 +86,7 @@ if __name__ == '__main__':
         for setting in task.iterdir():
             files = [file for file in setting.iterdir()]
             
-            if len(files) != 100:
+            if len(files) != 100 and len(files) != 1000:
                 print(setting.name + " is not finished yet")
                 continue
             
@@ -97,4 +97,4 @@ if __name__ == '__main__':
             data['psnr'].append(psnr)
             data['lpips'].append(lpips_val)
     
-    pd.DataFrame(data).to_csv('./new_metrics.csv')
+    pd.DataFrame(data).to_csv('./final_metrics.csv')

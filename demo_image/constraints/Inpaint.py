@@ -61,6 +61,7 @@ class InpaintConstraint():
             loss = -self.constraint(next_sample)
             return torch.autograd.grad(loss, samples)[0]
 
+# mask_generator code was taken from DPS 2022 (https://github.com/DPS2022/diffusion-posterior-sampling/)
 
 class mask_generator:
     def __init__(self, mask_type, mask_len_range=None, mask_prob_range=None,
