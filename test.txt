@@ -1,0 +1,7 @@
+einops
+matplotlib
+numpy==1.24.4
+pandas
+pillow
+scipy==1.9.1
+tensorflow==2.10.0
