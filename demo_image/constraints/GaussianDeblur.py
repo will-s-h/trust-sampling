@@ -59,6 +59,8 @@ class GaussianBlurConstraint():
             loss = -self.constraint(next_sample)
             return torch.autograd.grad(loss, samples)[0]
 
+# Blurkernel code was taken from DPS 2022 (https://github.com/DPS2022/diffusion-posterior-sampling/)
+
 class Blurkernel(nn.Module):
     def __init__(self, kernel_size=31, std=3.0, device=None):
         super().__init__()

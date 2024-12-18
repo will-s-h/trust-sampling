@@ -1,4 +1,3 @@
-# Resizer code was taken from: https://github.com/assafshocher/resizer by Assaf Shocher
 import numpy as np
 import torch
 from math import pi
@@ -53,14 +52,6 @@ class SuperResolutionConstraint():
         loss = torch.norm(difference)
         return loss
     
-    # def gradient(self, x_start, x_t, func=None):
-    #     # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
-    #     assert func is not None
-    #     with torch.enable_grad():
-    #         next_sample = func(x_start)[1]
-    #         loss = -self.constraint(next_sample)
-    #         return torch.autograd.grad(loss, x_t)[0]
-    
     def gradient(self, samples, func=None):
         # func should be of the form lambda x: self.model_predictions(x, cond, time_cond, clip_x_start=self.clip_denoised)
         assert func is not None
@@ -70,6 +61,7 @@ class SuperResolutionConstraint():
             loss = -self.constraint(next_sample)
             return torch.autograd.grad(loss, samples)[0]
 
+# Resizer code was taken from: https://github.com/assafshocher/resizer by Assaf Shocher
 
 class Resizer(nn.Module):
     def __init__(self, in_shape, scale_factor=None, output_shape=None, kernel=None, antialiasing=True):
