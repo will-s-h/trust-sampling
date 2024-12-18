@@ -26,10 +26,34 @@ Version numbers may not be strict requirements:
 
 ### 1) Download Model Checkpoints
 - image tasks:
-    - FFHQ: download `ffhq_10m.pt` from [link (DPS 2022)](https://drive.google.com/drive/folders/1jElnRoFv7b31fG0v6pTSQkelbSX3xGZh) and place in `./runs/image/ffhq_10m.pt`
-    - ImageNet: download `imagenet256.pt` from [link (DPS 2022)](https://drive.google.com/drive/folders/1jElnRoFv7b31fG0v6pTSQkelbSX3xGZh) and place in `./runs/image/imagenet256.pt`
+  - FFHQ: download `ffhq_10m.pt` from [link (DPS 2022)](https://drive.google.com/drive/folders/1jElnRoFv7b31fG0v6pTSQkelbSX3xGZh) and place in `./runs/image`
+  - ImageNet: download `imagenet256.pt` from [link (DPS 2022)](https://drive.google.com/drive/folders/1jElnRoFv7b31fG0v6pTSQkelbSX3xGZh) and place in `./runs/image`
 - motion tasks:
-    - 
+  - Download `exp4-train-4950.pt` (diffusion model parameters) and `motion-encoder-267.pt` (motion encoder parameters) from [link (Trust 2024)](https://drive.google.com/drive/folders/1BFmqhsesWGKsNQBhAX90Rlo8JZr_jmIn?usp=sharing) and place in `./runs/motion`
+
+### 2) Data
+- image tasks:
+  - FFHQ
+    - example dataset located in `./dataset/ffhq256-4`
+  - ImageNet
+    - example dataset located in `./dataset/imagenet-4`
+  - random masks used for box inpainting located in `./dataset/masks.pt`
+- motion tasks:
+  - AMASS
+    - example dataset located in `./data/AMASS_10`
+
+### 3) Demo
+Note: there are associated arguments with the following scripts that can be 
+- image tasks:
+  ```
+  cd demo_image
+  python demo.py
+  ```
+- motion tasks:
+  ```
+  cd demo_motion
+  python demo.py
+  ```
 
 ## Citation
 ```
