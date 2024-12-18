@@ -37,7 +37,7 @@ Version numbers may not be strict requirements:
     - example dataset located in `./dataset/ffhq256-4`
   - ImageNet
     - example dataset located in `./dataset/imagenet-4`
-  - random masks used for box inpainting located in `./dataset/masks.pt`
+  - random masks used for box inpainting can be downloaded from [link (Trust 2024)](https://drive.google.com/drive/folders/1BFmqhsesWGKsNQBhAX90Rlo8JZr_jmIn?usp=sharing) and placed in `./dataset/masks.pt`, although this is not necessary unless one wants to exactly reproduce behavior from the paper.
 - motion tasks:
   - AMASS
     - example dataset located in `./data/AMASS_10`
