@@ -43,7 +43,7 @@ Version numbers may not be strict requirements:
     - example dataset located in `./data/AMASS_10`
 
 ### 3) Demo
-Note: there are associated arguments with the following scripts that can be 
+Note: there are associated arguments with the following scripts that can be changed for different tasks, datasets, etc.
 - image tasks:
   ```
   cd demo_image
