@@ -9,9 +9,27 @@ Trust sampling effectively balances between following the unconditional diffusio
 
 ![Teaser Figure](/figures/Teaser%20Figure.png)
 
+## Requirements
+Version numbers may not be strict requirements:
+- python 3.10.13
+- pytorch3d 0.7.4
+- torch 2.0.0
+- einops
+- matplotlib
+- numpy 1.24.4
+- pandas
+- pillow
+- scipy 1.9.1
+- tensorflow 2.10.0
+
 ## Usage
 
-[to add]
+### 1) Download Model Checkpoints
+- image tasks:
+    - FFHQ: download `ffhq_10m.pt` from [link (DPS 2022)](https://drive.google.com/drive/folders/1jElnRoFv7b31fG0v6pTSQkelbSX3xGZh) and place in `./runs/image/ffhq_10m.pt`
+    - ImageNet: download `imagenet256.pt` from [link (DPS 2022)](https://drive.google.com/drive/folders/1jElnRoFv7b31fG0v6pTSQkelbSX3xGZh) and place in `./runs/image/imagenet256.pt`
+- motion tasks:
+    - 
 
 ## Citation
 ```

@@ -1,2 +1,0 @@
-exp_name,constraint mean,constraint std,foot_loss_z,foot_loss_z_std,norm_pred_noise,norm_pred_noise_std,PFC,PFC_std,foot_loss_velo,foot_loss_velo_std
-fixes_4950_trust_Lshape,0.81887025,0.0,10.017451073040142,,306.21490478515625,,16.464553555310758,0.0,0.010017451073040142,

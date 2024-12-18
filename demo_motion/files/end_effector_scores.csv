@@ -1,9 +1,0 @@
-,METHOD,,,,,CONSTRAINT,,,,REALISM,,
-exp_name,method,ddim steps,f_eval,max_norm,,constraint mean,constraint std,constraint 95perc,,norm_pred_noise,norm_pred_noise_std,norm_pred_noise_95perc
-end_effector_foot_handdsg50,dsg,50,50,NA,,0.047,0.023,0.089,,2.044,0.696,3.303
-,,,,,,,,,,,,
-end_effector_foot_handtrust50,trust,50,~200,82,,0.075,0.044,0.154,,2.028,0.649,3.095
-end_effector_foot_handdsg200,dsg,200,200,NA,,0.027,0.010,0.045,,1.590,0.562,2.626
-,,,,,,,,,,,,
-end_effector_foot_handtrust200,trust,200,~1000,88,,0.070,0.051,0.162,,1.773,0.423,2.403
-end_effector_foot_handdsg1000,dsg,1000,1000,NA,,0.021,0.009,0.036,,1.450,0.553,2.410
